@@ -1,0 +1,13 @@
+asn,ip,timestamp,malware,src_port,dst_ip,dst_port,dst_host,proto
+AS8881 1&1 Telecom GmbH,10.5.5.5,2026-06-11T08:20:00Z,Pseudo_Manuscrypt,64001,91.108.4.1,443,t.me,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.5,2026-06-11T08:25:00Z,Pseudo_Manuscrypt,64002,91.108.56.1,80,t.me,TCP
+AS8881 1&1 Telecom GmbH,172.18.100.5,2026-06-11T08:30:00Z,Zeus,64003,8.8.8.8,443,dns.google,TCP
+AS8881 1&1 Telecom GmbH,172.18.100.5,2026-06-11T08:35:00Z,Zeus,64004,8.8.4.4,443,dns.google,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.5,2026-06-13T21:00:00Z,Zeus,82001,8.8.8.8,443,dns.google,TCP
+AS8881 1&1 Telecom GmbH,172.18.100.5,2026-06-13T21:05:00Z,Andromeda,82002,8.8.4.4,443,dns.google,TCP
+AS8881 1&1 Telecom GmbH,192.168.200.88,2026-06-13T21:10:00Z,Nymaim,82003,91.108.4.1,443,t.me,TCP
+AS8881 1&1 Telecom GmbH,192.168.200.88,2026-06-13T21:15:00Z,Nymaim,82004,91.108.56.1,80,t.me,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.6,2026-06-13T21:20:00Z,Ranbyus,82005,1.1.1.1,443,one.one.one.one,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.6,2026-06-13T21:25:00Z,Ranbyus,82006,1.1.1.1,80,one.one.one.one,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.5,2026-06-14T02:55:00Z,Nymaim,90901,91.108.4.1,443,t.me,TCP
+AS8881 1&1 Telecom GmbH,172.18.100.5,2026-06-14T03:00:00Z,VipersoftX,90902,8.8.8.8,443,dns.google,TCP

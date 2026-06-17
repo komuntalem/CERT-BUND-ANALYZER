@@ -1,0 +1,31 @@
+asn,ip,timestamp,malware,src_port,dst_ip,dst_port,dst_host,proto
+AS3320 Deutsche Telekom,192.168.47.231,2026-06-14T00:30:00Z,Zeus,90001,8.8.8.8,443,dns.google,TCP
+AS3320 Deutsche Telekom,10.55.1.77,2026-06-14T00:35:00Z,Zeus,90002,8.8.4.4,80,dns.google,TCP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-14T00:40:00Z,Zeus,90003,1.1.1.1,443,one.one.one.one,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-14T00:45:00Z,Zeus,90004,9.9.9.9,53,dns.quad9.net,UDP
+AS3320 Deutsche Telekom,10.0.0.5,2026-06-14T00:50:00Z,Prometei,90005,149.154.160.1,443,telegram.org,TCP
+AS5607 Sky UK Limited,10.24.153.88,2026-06-14T01:00:00Z,Prometei,90101,185.220.101.1,9001,tor-exit.example,TCP
+AS5607 Sky UK Limited,10.24.100.200,2026-06-14T01:05:00Z,Prometei,90102,185.220.101.2,9001,tor-exit.example,TCP
+AS5607 Sky UK Limited,172.31.5.12,2026-06-14T01:10:00Z,Lumma,90103,8.8.8.8,443,dns.google,TCP
+AS1273 Vodafone Group,172.16.8.204,2026-06-14T01:15:00Z,Lumma,90201,8.8.8.8,443,dns.google,TCP
+AS1273 Vodafone Group,192.168.88.50,2026-06-14T01:20:00Z,Lumma,90202,1.1.1.1,443,one.one.one.one,TCP
+AS1273 Vodafone Group,10.200.5.9,2026-06-14T01:25:00Z,Andromeda,90203,8.8.4.4,80,dns.google,TCP
+AS6805 Telefonica Germany,192.168.12.5,2026-06-14T01:30:00Z,Andromeda,90301,8.8.8.8,443,dns.google,TCP
+AS6805 Telefonica Germany,10.14.55.99,2026-06-14T01:35:00Z,Nymaim,90302,91.108.4.1,443,t.me,TCP
+AS6805 Telefonica Germany,172.22.3.7,2026-06-14T01:40:00Z,Nymaim,90303,91.108.56.1,80,t.me,TCP
+AS8422 NetCologne,10.0.254.17,2026-06-14T01:45:00Z,VipersoftX,90401,8.8.8.8,443,dns.google,TCP
+AS8422 NetCologne,192.168.33.77,2026-06-14T01:50:00Z,VipersoftX,90402,8.8.4.4,443,dns.google,TCP
+AS8422 NetCologne,172.25.1.4,2026-06-14T01:55:00Z,Tinba,90403,1.1.1.1,80,one.one.one.one,TCP
+AS12312 1&1 Versatel,172.31.200.99,2026-06-14T02:00:00Z,Tinba,90501,8.8.8.8,443,dns.google,TCP
+AS12312 1&1 Versatel,10.45.70.12,2026-06-14T02:05:00Z,Ranbyus,90502,1.1.1.1,443,one.one.one.one,TCP
+AS12312 1&1 Versatel,192.168.9.34,2026-06-14T02:10:00Z,Ranbyus,90503,9.9.9.9,53,dns.quad9.net,UDP
+AS3209 Vodafone DE,192.168.3.142,2026-06-14T02:15:00Z,GhostWeaver,90601,9.9.9.9,443,dns.quad9.net,TCP
+AS3209 Vodafone DE,10.77.13.5,2026-06-14T02:20:00Z,GhostWeaver,90602,8.8.8.8,443,dns.google,TCP
+AS3209 Vodafone DE,172.28.44.200,2026-06-14T02:25:00Z,Pseudo_Manuscrypt,90603,91.108.4.1,443,t.me,TCP
+AS24940 Hetzner Online,10.10.10.50,2026-06-14T02:30:00Z,Pseudo_Manuscrypt,90701,91.108.56.1,80,t.me,TCP
+AS24940 Hetzner Online,5.9.33.1,2026-06-14T02:35:00Z,Zeus,90702,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.2,2026-06-14T02:40:00Z,Prometei,90703,149.154.167.1,443,telegram.org,TCP
+AS13184 Hansenet Telekommunikation,172.20.88.11,2026-06-14T02:45:00Z,Lumma,90801,8.8.8.8,443,dns.google,TCP
+AS13184 Hansenet Telekommunikation,192.168.55.7,2026-06-14T02:50:00Z,Andromeda,90802,8.8.4.4,443,dns.google,TCP
+AS8881 1&1 Telecom GmbH,10.5.5.5,2026-06-14T02:55:00Z,Nymaim,90901,91.108.4.1,443,t.me,TCP
+AS8881 1&1 Telecom GmbH,172.18.100.5,2026-06-14T03:00:00Z,VipersoftX,90902,8.8.8.8,443,dns.google,TCP

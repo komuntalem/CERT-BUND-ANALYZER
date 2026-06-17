@@ -1,0 +1,26 @@
+asn,ip,timestamp,malware,src_port,dst_ip,dst_port,dst_host,proto
+AS3320 Deutsche Telekom,192.168.47.231,2026-06-10T08:00:00Z,Zeus,50101,8.8.8.8,443,dns.google,TCP
+AS3320 Deutsche Telekom,192.168.47.231,2026-06-10T08:10:44Z,Zeus,50103,8.8.4.4,443,dns.google,TCP
+AS3320 Deutsche Telekom,10.55.1.77,2026-06-10T08:15:00Z,Zeus,50104,1.1.1.1,80,one.one.one.one,TCP
+AS3320 Deutsche Telekom,10.55.1.77,2026-06-10T08:20:30Z,Lumma,50105,1.1.1.1,443,one.one.one.one,TCP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-10T08:25:00Z,Lumma,50106,9.9.9.9,53,dns.quad9.net,UDP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-10T08:30:00Z,Andromeda,50107,8.8.8.8,443,dns.google,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-10T08:35:00Z,Andromeda,50108,8.8.4.4,80,dns.google,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-10T08:40:00Z,Zeus,50109,1.1.1.1,53,one.one.one.one,UDP
+AS3320 Deutsche Telekom,10.0.0.5,2026-06-10T08:45:00Z,Prometei,50110,149.154.160.1,443,telegram.org,TCP
+AS3320 Deutsche Telekom,10.0.0.5,2026-06-10T08:50:00Z,Prometei,50111,149.154.167.1,443,telegram.org,TCP
+AS3320 Deutsche Telekom,172.20.1.100,2026-06-10T08:55:00Z,Nymaim,50112,91.108.4.1,443,t.me,TCP
+AS3320 Deutsche Telekom,172.20.1.100,2026-06-10T09:00:00Z,Nymaim,50113,91.108.56.1,80,t.me,TCP
+AS3320 Deutsche Telekom,192.168.10.201,2026-06-10T09:05:00Z,VipersoftX,50114,8.8.8.8,443,dns.google,TCP
+AS3320 Deutsche Telekom,192.168.10.201,2026-06-10T09:10:00Z,VipersoftX,50115,8.8.4.4,53,dns.google,UDP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-11T06:10:00Z,Andromeda,60003,9.9.9.9,53,dns.quad9.net,UDP
+AS3320 Deutsche Telekom,10.55.1.77,2026-06-12T14:05:00Z,Prometei,70002,149.154.160.1,443,telegram.org,TCP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-12T14:10:00Z,Nymaim,70003,91.108.4.1,443,t.me,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-13T21:30:00Z,Pseudo_Manuscrypt,83001,91.108.56.1,443,t.me,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-13T21:35:00Z,Pseudo_Manuscrypt,83002,91.108.4.1,80,t.me,TCP
+AS3320 Deutsche Telekom,10.0.0.5,2026-06-13T21:40:00Z,GhostWeaver,83003,9.9.9.9,443,dns.quad9.net,TCP
+AS3320 Deutsche Telekom,172.20.1.100,2026-06-13T21:45:00Z,VipersoftX,83004,8.8.8.8,443,dns.google,TCP
+AS3320 Deutsche Telekom,192.168.10.201,2026-06-13T21:50:00Z,Tinba,83005,1.1.1.1,443,one.one.one.one,TCP
+AS3320 Deutsche Telekom,10.55.1.77,2026-06-14T00:35:00Z,Zeus,90002,8.8.4.4,80,dns.google,TCP
+AS3320 Deutsche Telekom,172.17.42.8,2026-06-14T00:40:00Z,Zeus,90003,1.1.1.1,443,one.one.one.one,TCP
+AS3320 Deutsche Telekom,192.168.200.3,2026-06-14T00:45:00Z,Zeus,90004,9.9.9.9,53,dns.quad9.net,UDP

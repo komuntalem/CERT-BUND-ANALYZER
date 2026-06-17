@@ -1,0 +1,12 @@
+asn,ip,timestamp,malware,src_port,dst_ip,dst_port,dst_host,proto
+AS1273 Vodafone Group,172.16.8.204,2026-06-10T09:40:00Z,Lumma,52001,8.8.8.8,443,dns.google,TCP
+AS1273 Vodafone Group,172.16.8.204,2026-06-10T09:45:00Z,Lumma,52002,8.8.4.4,80,dns.google,TCP
+AS1273 Vodafone Group,192.168.88.50,2026-06-10T09:50:00Z,GhostWeaver,52003,9.9.9.9,443,dns.quad9.net,TCP
+AS1273 Vodafone Group,192.168.88.50,2026-06-10T09:55:00Z,GhostWeaver,52004,9.9.9.9,53,dns.quad9.net,UDP
+AS1273 Vodafone Group,172.16.8.204,2026-06-12T14:45:00Z,Andromeda,71001,8.8.4.4,443,dns.google,TCP
+AS1273 Vodafone Group,172.16.8.204,2026-06-12T14:50:00Z,Andromeda,71002,1.1.1.1,443,one.one.one.one,TCP
+AS1273 Vodafone Group,192.168.88.50,2026-06-12T14:55:00Z,Zeus,71003,8.8.8.8,443,dns.google,TCP
+AS1273 Vodafone Group,10.200.5.9,2026-06-12T15:00:00Z,Zeus,71004,8.8.4.4,80,dns.google,TCP
+AS1273 Vodafone Group,10.200.5.9,2026-06-12T15:05:00Z,Tinba,71005,8.8.8.8,443,dns.google,TCP
+AS1273 Vodafone Group,192.168.88.50,2026-06-14T01:20:00Z,Lumma,90202,1.1.1.1,443,one.one.one.one,TCP
+AS1273 Vodafone Group,10.200.5.9,2026-06-14T01:25:00Z,Andromeda,90203,8.8.4.4,80,dns.google,TCP

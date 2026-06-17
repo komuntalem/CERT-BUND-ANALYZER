@@ -1,0 +1,18 @@
+asn,ip,timestamp,malware,src_port,dst_ip,dst_port,dst_host,proto
+AS24940 Hetzner Online,10.10.10.50,2026-06-11T07:15:00Z,Ranbyus,62001,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,10.10.10.50,2026-06-11T07:20:00Z,Ranbyus,62002,8.8.4.4,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.1,2026-06-11T07:25:00Z,Prometei,62003,149.154.160.1,443,telegram.org,TCP
+AS24940 Hetzner Online,5.9.33.1,2026-06-11T07:30:00Z,Prometei,62004,149.154.167.1,443,telegram.org,TCP
+AS24940 Hetzner Online,5.9.33.2,2026-06-11T07:35:00Z,Zeus,62005,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.2,2026-06-11T07:40:00Z,Zeus,62006,8.8.4.4,80,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.3,2026-06-11T07:45:00Z,Lumma,62007,1.1.1.1,443,one.one.one.one,TCP
+AS24940 Hetzner Online,5.9.33.3,2026-06-11T07:50:00Z,Lumma,62008,1.1.1.1,80,one.one.one.one,TCP
+AS24940 Hetzner Online,10.10.10.50,2026-06-13T20:00:00Z,Zeus,80001,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.2,2026-06-13T20:10:00Z,Lumma,80003,1.1.1.1,443,one.one.one.one,TCP
+AS24940 Hetzner Online,5.9.33.3,2026-06-13T20:15:00Z,Andromeda,80004,9.9.9.9,53,dns.quad9.net,UDP
+AS24940 Hetzner Online,5.9.33.4,2026-06-13T20:20:00Z,Nymaim,80005,91.108.4.1,443,t.me,TCP
+AS24940 Hetzner Online,5.9.33.5,2026-06-13T20:25:00Z,VipersoftX,80006,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.6,2026-06-13T20:30:00Z,Tinba,80007,8.8.4.4,80,dns.google,TCP
+AS24940 Hetzner Online,10.10.10.50,2026-06-14T02:30:00Z,Pseudo_Manuscrypt,90701,91.108.56.1,80,t.me,TCP
+AS24940 Hetzner Online,5.9.33.1,2026-06-14T02:35:00Z,Zeus,90702,8.8.8.8,443,dns.google,TCP
+AS24940 Hetzner Online,5.9.33.2,2026-06-14T02:40:00Z,Prometei,90703,149.154.167.1,443,telegram.org,TCP

@@ -1,20 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
+# Python cache
+_pycache_/
+*.pyc
+*.pyo
 
-# Virtual environments
-venv/
+# Virtual environment
 .venv/
+venv/
 
-# Django
+# Database
 db.sqlite3
 
-# Media uploads/generated files
+# Media and generated files
 media/
+*.zip
+*.csv
+*.log
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# VS Code
+# IDE files
 .vscode/
+.idea/

@@ -867,6 +867,29 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .malware-banner-icon { font-size: 1.25rem; }
 .malware-banner-title { font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
 
+/* ── Malware Summary Tags ──────────────────────────────────────── */
+.malware-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(167,139,250,0.08);
+  color: var(--violet);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid rgba(167,139,250,0.12);
+  transition: var(--transition);
+}
+.malware-tag:hover {
+  background: rgba(167,139,250,0.15);
+  border-color: rgba(167,139,250,0.3);
+}
+.malware-tag .count {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+}
+
 /* ── Analyze Loading Overlay ───────────────────────── */
 #analyze-overlay {
   position: fixed; inset: 0; z-index: 900;
@@ -952,6 +975,8 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .stat-value.cyan    { color: var(--cyan); }
 .stat-value.violet  { color: var(--violet); }
 .stat-value.amber   { color: var(--amber); }
+.stat-card.clickable { cursor: pointer; }
+.stat-card.clickable:hover { border-color: var(--violet); box-shadow: 0 0 30px rgba(167,139,250,0.15); }
 
 .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
 .chart-card {
@@ -959,6 +984,8 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   border-radius: var(--radius-lg); backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px); padding: 1.75rem; transition: var(--transition);
 }
+.chart-card.clickable { cursor: pointer; }
+.chart-card.clickable:hover { border-color: var(--violet); box-shadow: 0 0 40px rgba(167,139,250,0.15); }
 .chart-card:hover {
   box-shadow: 0 0 40px rgba(16,217,122,0.08), 0 4px 32px rgba(0,0,0,0.4);
   border-color: rgba(255,255,255,0.1);
@@ -1060,6 +1087,7 @@ BASE_HTML = f"""<!DOCTYPE html>
             <span class="dot" aria-hidden="true"></span>
             <span>{{{{ user.username }}}}</span>
           </div>
+          <a href="{{% url 'malware_list' %}}" class="btn btn-ghost" style="padding:0.4rem 1rem; border-color:rgba(167,139,250,0.2);">🦠 Malware</a>
           <a href="{{% url 'logout' %}}" class="btn btn-danger" id="logout-btn">Sign out</a>
         {{% endif %}}
         {{% block navbar_extra %}}{{% endblock %}}
@@ -1417,9 +1445,9 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       <div class="stat-label">Unique ASNs</div>
       <div class="stat-value cyan" id="stat-asns">{{ run.unique_asns }}</div>
     </div>
-    <div class="stat-card" role="listitem" style="--accent-color: rgba(167,139,250,0.06);">
+    <div class="stat-card clickable" role="listitem" style="--accent-color: rgba(167,139,250,0.06);" onclick="window.location.href='{% url 'malware_list' %}'">
       <span class="stat-icon" aria-hidden="true">🦠</span>
-      <div class="stat-label">Malware Families</div>
+      <div class="stat-label">Malware Families <span style="font-size:0.6rem;color:var(--violet);">↗</span></div>
       <div class="stat-value violet" id="stat-malwares">{{ run.unique_malwares }}</div>
     </div>
     <div class="stat-card" role="listitem" style="--accent-color: rgba(245,158,11,0.06);">
@@ -1450,10 +1478,15 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       {% endif %}
     </div>
 
-    <div class="chart-card">
-      <div class="chart-card-header">
-        <div class="chart-card-title">🦠 Detected Malwares</div>
-        <div class="chart-card-subtitle">Top {{ run.malware_stats|length }} malware families observed</div>
+    <div class="chart-card clickable" onclick="window.location.href='{% url 'malware_list' %}'">
+      <div class="chart-card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div class="chart-card-title">🦠 Detected Malwares</div>
+          <div class="chart-card-subtitle">Top {{ run.malware_stats|length }} malware families observed</div>
+        </div>
+        <a href="{% url 'malware_list' %}" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem; border-color:rgba(167,139,250,0.3);" onclick="event.stopPropagation();">
+          View All →
+        </a>
       </div>
       {% if run.malware_stats %}
         <div class="chart-container" style="height:280px;">
@@ -1464,6 +1497,17 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
           </div>
         </div>
         <div class="chart-legend" id="malware-legend" aria-label="Malware legend"></div>
+
+        <!-- Recent Malware Summary -->
+        <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--border);">
+          <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+            {% for malware in run.malware_stats|slice:":5" %}
+              <span class="malware-tag">
+                {{ malware.label }} <span class="count">({{ malware.count }})</span>
+              </span>
+            {% endfor %}
+          </div>
+        </div>
       {% else %}
         <div class="no-data-state"><div class="icon" aria-hidden="true">🦠</div><p>No malware data available</p></div>
       {% endif %}
@@ -1501,6 +1545,9 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       {% else %}
         <span class="btn btn-ghost" style="cursor:default;opacity:0.5;">No results file</span>
       {% endif %}
+      <a href="/intel/generate/{{ run.pk }}/" class="btn btn-ghost">📋 Generate Advisories</a>
+      <a href="/intel/asns/" class="btn btn-ghost">🌐 View ASNs</a>
+      <a href="/intel/advisories/" class="btn btn-ghost">📄 View Advisories</a>
       <a href="/" class="btn btn-ghost">🔬 New Analysis</a>
     </div>
   </div>
@@ -1607,6 +1654,873 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+MALWARE_LIST_HTML = """{% extends 'analyzer/base.html' %}
+{% block title %}Malware Intelligence — CERT-Bund Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout">
+  
+  <div class="dashboard-header">
+    <div class="dashboard-breadcrumb">
+      <a href="/">⬆ Upload</a>
+      <span aria-hidden="true">›</span>
+      <span>Malware Intelligence</span>
+    </div>
+    <h1 class="dashboard-title">🦠 Malware Threat Database</h1>
+    <div class="dashboard-meta">
+      <span>📊 {{ total_count }} malware families tracked</span>
+      <span>🔄 Updated: {% now "N j, Y — H:i" %}</span>
+    </div>
+  </div>
+
+  <!-- Search & Filter -->
+  <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:2rem; padding:1.5rem; background:var(--bg-card); border-radius:var(--radius-lg); border:1px solid var(--border);">
+    <form method="GET" style="display:flex; gap:0.75rem; flex-wrap:wrap; flex:1;">
+      <input type="text" name="q" placeholder="Search malware..." value="{{ query }}" 
+             style="flex:1; min-width:200px; padding:0.75rem 1rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-family:inherit;">
+      <select name="severity" style="padding:0.75rem 1rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-family:inherit;">
+        <option value="">All Severities</option>
+        {% for value, label in severity_choices %}
+        <option value="{{ value }}" {% if severity == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <select name="status" style="padding:0.75rem 1rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-family:inherit;">
+        <option value="">All Statuses</option>
+        {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-primary">🔍 Search</button>
+      <a href="{% url 'malware_list' %}" class="btn btn-ghost">✕ Clear</a>
+    </form>
+  </div>
+
+  <!-- Malware List -->
+  <div style="display:grid; gap:1rem;">
+    {% for m in malware %}
+    <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-md); padding:1.25rem 1.5rem; transition:var(--transition); cursor:pointer;"
+         onclick="openMalwareModal({{ m.id }})"
+         onmouseover="this.style.borderColor='var(--emerald)'"
+         onmouseout="this.style.borderColor='var(--border)'">
+      
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+        <div style="display:flex; align-items:center; gap:1rem;">
+          <span style="font-size:1.5rem;">
+            {% if m.severity == 'critical' %}🔴
+            {% elif m.severity == 'high' %}🟠
+            {% elif m.severity == 'medium' %}🟡
+            {% elif m.severity == 'low' %}🟢
+            {% else %}⚪{% endif %}
+          </span>
+          <div>
+            <h3 style="font-weight:700; color:var(--text-primary); margin-bottom:0.2rem;">{{ m.name }}</h3>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; font-size:0.82rem; color:var(--text-muted);">
+              <span>📍 {{ m.family|default:'Family unknown' }}</span>
+              <span>🎯 {{ m.threat_actor|default:'Actor unknown' }}</span>
+              <span>📊 {{ m.get_severity_display }}</span>
+              <span>📌 {{ m.get_status_display }}</span>
+              <span>📅 {{ m.first_seen_date|date:"Y-m-d" }}</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          {% if m.report %}
+          <span style="background:rgba(167,139,250,0.12); color:var(--violet); border-radius:999px; padding:0.2rem 0.75rem; font-size:0.75rem; font-weight:600;">
+            📄 Report v{{ m.report.version }}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% empty %}
+    <div class="no-data-state" style="padding:3rem;">
+      <div class="icon" aria-hidden="true">🦠</div>
+      <p>No malware entries found</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Pagination -->
+  {% if malware.paginator.num_pages > 1 %}
+  <div style="display:flex; justify-content:center; gap:0.5rem; margin-top:2rem; padding:1rem 0;">
+    {% if malware.has_previous %}
+    <a href="?page=1{% if query %}&q={{ query }}{% endif %}{% if severity %}&severity={{ severity }}{% endif %}" class="btn btn-ghost">First</a>
+    <a href="?page={{ malware.previous_page_number }}{% if query %}&q={{ query }}{% endif %}{% if severity %}&severity={{ severity }}{% endif %}" class="btn btn-ghost">‹</a>
+    {% endif %}
+    
+    <span style="display:flex; align-items:center; padding:0.5rem 1rem; color:var(--text-secondary);">
+      Page {{ malware.number }} of {{ malware.paginator.num_pages }}
+    </span>
+    
+    {% if malware.has_next %}
+    <a href="?page={{ malware.next_page_number }}{% if query %}&q={{ query }}{% endif %}{% if severity %}&severity={{ severity }}{% endif %}" class="btn btn-ghost">›</a>
+    <a href="?page={{ malware.paginator.num_pages }}{% if query %}&q={{ query }}{% endif %}{% if severity %}&severity={{ severity }}{% endif %}" class="btn btn-ghost">Last</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- Malware Detail Modal -->
+<div id="malware-modal" style="display:none; position:fixed; inset:0; z-index:2000; background:rgba(8,9,13,0.85); backdrop-filter:blur(16px); align-items:center; justify-content:center; padding:2rem; overflow-y:auto;">
+  <div style="position:relative; width:100%; max-width:900px; max-height:90vh; overflow-y:auto; background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-xl); padding:2rem; box-shadow:0 32px 80px rgba(0,0,0,0.6);">
+    <button onclick="closeMalwareModal()" style="position:sticky; top:0; float:right; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:50%; width:40px; height:40px; color:var(--text-secondary); font-size:1.2rem; cursor:pointer;">✕</button>
+    <div id="modal-content" style="margin-top:0.5rem;">
+      <div style="text-align:center; padding:3rem; color:var(--text-muted);">
+        <div style="font-size:2rem; margin-bottom:1rem;">⏳</div>
+        <p>Loading malware details...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openMalwareModal(id) {
+  const modal = document.getElementById('malware-modal');
+  const content = document.getElementById('modal-content');
+  modal.style.display = 'flex';
+  content.innerHTML = `<div style="text-align:center; padding:3rem; color:var(--text-muted);">
+    <div style="font-size:2rem; margin-bottom:1rem;">⏳</div>
+    <p>Loading malware details...</p>
+  </div>`;
+  
+  fetch(`/malware/${id}/`)
+    .then(response => response.text())
+    .then(html => {
+      content.innerHTML = html;
+    })
+    .catch(() => {
+      content.innerHTML = `<div style="text-align:center; padding:3rem; color:var(--rose);">
+        <div style="font-size:2rem; margin-bottom:1rem;">❌</div>
+        <p>Failed to load malware details</p>
+      </div>`;
+    });
+}
+
+function closeMalwareModal() {
+  document.getElementById('malware-modal').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeMalwareModal();
+});
+</script>
+{% endblock %}"""
+
+MALWARE_DETAIL_HTML = """{% load static %}
+
+<div style="max-width:100%; padding:1rem;">
+  <!-- Header -->
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem; padding-bottom:1.5rem; border-bottom:1px solid var(--border);">
+    <div>
+      <h2 style="font-size:1.6rem; font-weight:800; margin-bottom:0.5rem;">
+        🦠 {{ malware.name }}
+      </h2>
+      <div style="display:flex; gap:1rem; flex-wrap:wrap; font-size:0.85rem; color:var(--text-muted);">
+        <span>📍 Family: <strong style="color:var(--text-primary);">{{ ai_data.family|default:malware.name }}</strong></span>
+        <span>🎯 Actor: <strong style="color:var(--text-primary);">{{ ai_data.threat_actor|default:'Unknown' }}</strong></span>
+        <span>📊 Severity: <strong style="color:{% if ai_data.severity == 'critical' %}var(--rose){% elif ai_data.severity == 'high' %}var(--amber){% elif ai_data.severity == 'medium' %}var(--amber){% elif ai_data.severity == 'low' %}var(--emerald){% else %}var(--text-muted){% endif %};">
+          {{ ai_data.severity|default:'Unknown'|upper }}
+        </strong></span>
+        <span>📌 Status: <strong style="color:var(--text-primary);">{{ malware.get_status_display }}</strong></span>
+        <span>📅 First seen: <strong style="color:var(--text-primary);">{{ malware.first_seen_date|date:"Y-m-d H:i" }}</strong></span>
+        <span>🤖 Source: <strong style="color:var(--cyan);">{{ ai_data.source|default:'OpenRouter AI' }}</strong></span>
+      </div>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+      <button onclick="location.href='{% url 'malware_report' malware.id %}'" class="btn btn-primary">📄 View Full Report (AI)</button>
+      <button onclick="regenerateSummary({{ malware.id }})" class="btn btn-ghost">🔄 Regenerate Summary</button>
+    </div>
+  </div>
+
+  <!-- Description - Brief AI Summary -->
+  <div style="margin-bottom:1.5rem;">
+    <h3 style="font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem;">Summary</h3>
+    <div style="color:var(--text-secondary); line-height:1.8; background:rgba(255,255,255,0.02); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      {{ ai_data.summary|default:'No summary available.' }}
+    </div>
+  </div>
+
+  <!-- Capabilities -->
+  <div style="margin-bottom:1.5rem;">
+    <h3 style="font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem;">Key Capabilities</h3>
+    <div style="color:var(--text-secondary); line-height:1.8; background:rgba(255,255,255,0.02); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      {{ ai_data.capabilities|default:'Unknown capabilities.' }}
+    </div>
+  </div>
+
+  <!-- Target Platform & Infection Vector -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+    <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      <h4 style="font-weight:600; color:var(--text-muted); margin-bottom:0.3rem; font-size:0.8rem;">Target Platform</h4>
+      <p style="color:var(--text-secondary);">{{ ai_data.target_platform|default:'Unknown' }}</p>
+    </div>
+    <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      <h4 style="font-weight:600; color:var(--text-muted); margin-bottom:0.3rem; font-size:0.8rem;">Infection Vector</h4>
+      <p style="color:var(--text-secondary);">{{ ai_data.infection_vector|default:'Unknown' }}</p>
+    </div>
+  </div>
+
+  <!-- References -->
+  {% if ai_data.references %}
+  <div style="margin-bottom:1rem;">
+    <h3 style="font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem;">References</h3>
+    <div style="background:rgba(255,255,255,0.02); padding:0.75rem 1rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+      {% for ref in ai_data.references.splitlines %}
+        {% if ref.strip %}
+          {% if ref.strip|slice:":4" == "http" %}
+            <div style="padding:0.2rem 0;"><a href="{{ ref.strip }}" target="_blank" style="color:var(--cyan); text-decoration:none;">{{ ref.strip }}</a></div>
+          {% else %}
+            <div style="padding:0.2rem 0; color:var(--text-secondary);">{{ ref.strip }}</div>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--border); font-size:0.75rem; color:var(--text-muted);">
+    Data sourced from: {{ ai_data.source|default:'OpenRouter AI' }}
+  </div>
+</div>
+
+<script>
+function regenerateSummary(id) {
+  if (!confirm('Regenerate AI summary for this malware?')) return;
+  
+  const btn = event.target;
+  const original = btn.textContent;
+  btn.textContent = '⏳ Generating...';
+  btn.disabled = true;
+  
+  // Force refresh by reloading
+  location.reload();
+}
+</script>"""
+
+MALWARE_REPORT_HTML = r"""{% extends 'analyzer/base.html' %}
+{% load static %}
+{% block title %}AI Report — {{ malware.name }} — CERT-Bund Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout" style="padding: 1.5rem 1.5rem;">
+  
+  <div class="dashboard-header" style="margin-bottom: 1.5rem;">
+    <div class="dashboard-breadcrumb" style="font-size: 0.75rem; margin-bottom: 0.5rem;">
+      <a href="/">⬆ Upload</a>
+      <span aria-hidden="true">›</span>
+      <a href="{% url 'malware_list' %}">🦠 Malware</a>
+      <span aria-hidden="true">›</span>
+      <span>{{ malware.name }} Report</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+      <h1 class="dashboard-title" style="font-size: 1.5rem; margin-bottom: 0;">📄 {{ malware.name }} — AI Threat Report</h1>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <a href="{% url 'malware_detail' malware.id %}" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem;">← Back</a>
+        {% if report_exists %}
+        <a href="{% url 'download_report' malware.id %}" class="btn btn-primary" style="padding:0.4rem 0.8rem; font-size:0.8rem;">⬇ Download Word</a>
+        {% endif %}
+        <button onclick="regenerateReport()" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem;">🔄 Regenerate</button>
+        <button onclick="saveEdits()" class="btn btn-primary" id="save-btn" style="padding:0.4rem 0.8rem; font-size:0.8rem;">💾 Save</button>
+      </div>
+    </div>
+    <div class="dashboard-meta" style="font-size: 0.75rem; margin-top: 0.2rem;">
+      <span>📊 Report v{{ report.version|default:1 }}</span>
+      <span>🕐 {{ report.generated_at|date:"N j, Y — H:i"|default:"Not generated" }}</span>
+      <span>🤖 Generated by: AI (OpenRouter)</span>
+    </div>
+  </div>
+
+  <!-- Report Editor -->
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; margin-bottom: 1.5rem;">
+    
+    <!-- Toolbar -->
+    <div style="padding:0.5rem 1rem; border-bottom:1px solid var(--border); display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; background:rgba(0,0,0,0.2);">
+      <span style="font-size:0.75rem; font-weight:600; color:var(--text-muted);">✏️ Edit Report</span>
+      <span style="flex:1;"></span>
+      <span style="font-size:0.65rem; color:var(--text-muted);">Plain text • Save to apply changes</span>
+    </div>
+    
+    <!-- Content -->
+    <form id="report-form" style="padding:1rem 1.5rem;">
+      {% csrf_token %}
+      <textarea id="report-editor" name="content" 
+                style="width:100%; min-height:400px; background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:1rem; color:var(--text-primary); font-family:'Courier New', monospace; font-size:0.85rem; line-height:1.6; resize:vertical; outline:none; transition:var(--transition); white-space:pre-wrap;"
+                onfocus="this.style.borderColor='var(--emerald)'"
+                onblur="this.style.borderColor='var(--border)'">{{ report_content }}</textarea>
+    </form>
+    
+    <!-- Actions -->
+    <div style="padding:0.5rem 1rem; border-top:1px solid var(--border); display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.2);">
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <button onclick="previewReport()" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem;">👁️ Preview</button>
+        <button onclick="downloadReport()" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem;">⬇ Download</button>
+      </div>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <button onclick="saveEdits()" class="btn btn-primary" id="save-btn" style="padding:0.3rem 0.8rem; font-size:0.75rem;">💾 Save Edits</button>
+        <button onclick="regenerateReport()" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem;">🔄 Regenerate with AI</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Preview -->
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;">
+    <div style="padding:0.4rem 1rem; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2); display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:0.75rem; font-weight:600; color:var(--text-muted);">👁️ Live Preview</span>
+      <span style="font-size:0.65rem; color:var(--text-muted);">(Links are clickable)</span>
+    </div>
+    <div id="live-preview" style="padding:1.5rem; min-height:300px; color:var(--text-primary); background:rgba(0,0,0,0.15);">
+      {{ report_content|safe }}
+    </div>
+  </div>
+
+</div>
+
+<script>
+function getEditorContent() {
+  return document.getElementById('report-editor').value;
+}
+
+function updatePreview() {
+  const content = getEditorContent();
+  // Convert plain text with links to HTML
+  const htmlContent = content
+    .replace(/\n/g, '<br>')
+    .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: var(--cyan); text-decoration: underline;">$1</a>');
+  document.getElementById('live-preview').innerHTML = htmlContent;
+}
+
+// Update preview on input
+document.addEventListener('DOMContentLoaded', function() {
+  const editor = document.getElementById('report-editor');
+  editor.addEventListener('input', updatePreview);
+  updatePreview();
+});
+
+function saveEdits() {
+  const btn = document.getElementById('save-btn');
+  const original = btn.textContent;
+  btn.textContent = '⏳ Saving...';
+  btn.disabled = true;
+  
+  const content = getEditorContent();
+  
+  fetch('{% url "update_malware" malware.id %}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+    },
+    body: JSON.stringify({
+      description: content,
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      alert('✅ Report saved successfully!');
+    } else {
+      alert('❌ Failed to save: ' + (data.error || 'Unknown error'));
+    }
+  })
+  .catch(() => {
+    alert('❌ Network error. Please try again.');
+  })
+  .finally(() => {
+    btn.textContent = original;
+    btn.disabled = false;
+  });
+}
+
+function regenerateReport() {
+  if (!confirm('Regenerate report using AI? This will overwrite manual edits.')) return;
+  
+  const btn = event.target;
+  const original = btn.textContent;
+  btn.textContent = '⏳ Generating...';
+  btn.disabled = true;
+  
+  fetch('{% url "generate_report" malware.id %}')
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        location.reload();
+      } else {
+        alert('Failed to regenerate: ' + (data.error || 'Unknown error'));
+      }
+    })
+    .catch(() => {
+      alert('Network error. Please try again.');
+    })
+    .finally(() => {
+      btn.textContent = original;
+      btn.disabled = false;
+    });
+}
+
+function previewReport() {
+  const content = getEditorContent();
+  const previewWindow = window.open('', '_blank', 'width=1000,height=800');
+  previewWindow.document.write(`
+    <html>
+      <head>
+        <title>Report Preview - {{ malware.name }}</title>
+        <style>
+          body { 
+            font-family: 'Segoe UI', Arial, sans-serif;
+            max-width: 1000px; 
+            margin: 2rem auto; 
+            padding: 2rem; 
+            background: #0a0a0f; 
+            color: #f1f5f9; 
+            line-height: 1.7;
+          }
+          .report-container {
+            background: rgba(15, 17, 26, 0.85);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.07);
+          }
+          a { color: #22d3ee; text-decoration: underline; }
+          a:hover { color: #67e8f9; }
+          h1, h2, h3 { color: #10d97a; }
+          .section { margin-bottom: 1.5rem; }
+          p { margin: 0.5rem 0; }
+        </style>
+      </head>
+      <body>
+        <div class="report-container">
+          ${content.replace(/\n/g, '<br>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>')}
+        </div>
+      </body>
+    </html>
+  `);
+  previewWindow.document.close();
+}
+
+function downloadReport() {
+  const link = document.createElement('a');
+  link.href = '{% url "download_report" malware.id %}';
+  link.download = 'malware_{{ malware.name }}_{{ malware.id }}.docx';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+</script>
+{% endblock %}"""
+
+
+
+INTEL_ADVISORY_DETAIL_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ advisory.advisory_number|default:"Advisory Detail" }} — CERT-BUND Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <h1>{{ advisory.advisory_number|default:"Draft Advisory" }}</h1>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-sm-3">ASN</dt>
+                <dd class="col-sm-9">
+                    <a href="{% url 'threatintel:asn-detail' advisory.asn.pk %}">{{ advisory.asn.asn_number }}</a>
+                    — {{ advisory.asn.get_display_name }}
+                </dd>
+
+                <dt class="col-sm-3">Malware</dt>
+                <dd class="col-sm-9">{{ advisory.malware.malware_name }}</dd>
+
+                <dt class="col-sm-3">Risk Level</dt>
+                <dd class="col-sm-9">
+                    {% if advisory.malware.risk_level == "Critical" %}
+                        <span class="badge bg-danger">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "High" %}
+                        <span class="badge bg-warning text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "Medium" %}
+                        <span class="badge bg-info text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ advisory.malware.risk_level }}</span>
+                    {% endif %}
+                </dd>
+
+                <dt class="col-sm-3">Created</dt>
+                <dd class="col-sm-9">{{ advisory.created_at|date:"Y-m-d H:i" }}</dd>
+            </dl>
+        </div>
+    </div>
+
+    <h3>Edit Advisory</h3>
+    <form method="post">
+        {% csrf_token %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label for="id_advisory_number" class="form-label">Advisory Number</label>
+                {{ form.advisory_number }}
+            </div>
+            <div class="col-md-4">
+                <label for="id_advisory_date" class="form-label">Advisory Date</label>
+                {{ form.advisory_date }}
+            </div>
+            <div class="col-md-4">
+                <label for="id_status" class="form-label">Status</label>
+                {{ form.status }}
+            </div>
+        </div>
+        <div class="mb-3">
+            <label for="id_summary" class="form-label">Summary</label>
+            {{ form.summary }}
+        </div>
+        <div class="mb-3">
+            <label for="id_recommended_mitigation" class="form-label">Recommended Mitigation</label>
+            {{ form.recommended_mitigation }}
+        </div>
+        <div class="mb-3">
+            <label for="id_content" class="form-label">Full Content</label>
+            {{ form.content }}
+        </div>
+        <div class="d-flex gap-2 mb-4">
+            <button class="btn btn-primary" type="submit">Save Advisory</button>
+            <a class="btn btn-outline-secondary" href="{% url 'threatintel:download-advisory-docx' advisory.pk %}">⬇ Advisory .docx</a>
+            {% if has_email_draft %}
+                <a class="btn btn-outline-secondary" href="{% url 'threatintel:download-email-docx' advisory.pk %}">⬇ Email .docx</a>
+                <a class="btn btn-outline-success" href="{% url 'threatintel:gmail-draft' advisory.pk %}" target="_blank">✉ Open Gmail Draft</a>
+            {% endif %}
+        </div>
+    </form>
+
+    {% if has_email_draft %}
+    <hr>
+    <h3>Email Draft</h3>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="id_subject" class="form-label">Subject</label>
+            {{ email_form.subject }}
+        </div>
+        <div class="mb-3">
+            <label for="id_body" class="form-label">Body</label>
+            {{ email_form.body }}
+        </div>
+        <button class="btn btn-primary" type="submit">Save Email Draft</button>
+    </form>
+    {% else %}
+    <div class="alert alert-info mt-4">No email draft has been generated for this advisory yet.</div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a class="btn btn-secondary" href="{% url 'threatintel:advisory-list' %}">Back to Advisories</a>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+
+INTEL_ADVISORY_LIST_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advisories — CERT-BUND Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    <h1>Advisories</h1>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    <table class="table table-striped table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>Advisory #</th>
+                <th>Date</th>
+                <th>Organization</th>
+                <th>Malware</th>
+                <th>Risk Level</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for advisory in advisories %}
+            <tr>
+                <td><a href="{% url 'threatintel:advisory-detail' advisory.pk %}">{{ advisory.advisory_number|default:"Draft" }}</a></td>
+                <td>{{ advisory.advisory_date }}</td>
+                <td>{{ advisory.asn.get_display_name }}</td>
+                <td>{{ advisory.malware.malware_name }}</td>
+                <td>
+                    {% if advisory.malware.risk_level == "Critical" %}
+                        <span class="badge bg-danger">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "High" %}
+                        <span class="badge bg-warning text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "Medium" %}
+                        <span class="badge bg-info text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ advisory.malware.risk_level }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if advisory.status == "sent" %}
+                        <span class="badge bg-success">Sent</span>
+                    {% elif advisory.status == "ready" %}
+                        <span class="badge bg-primary">Ready</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Draft</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="text-muted text-center">No advisories generated yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a class="btn btn-secondary" href="/">Back to Dashboard</a>
+</div>
+</body>
+</html>
+"""
+
+
+INTEL_ASN_DETAIL_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ asn.get_display_name }} — CERT-BUND Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    <h1>{{ asn.get_display_name }}</h1>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-sm-3">ASN Number</dt>
+                <dd class="col-sm-9">{{ asn.asn_number }}</dd>
+
+                <dt class="col-sm-3">Organization</dt>
+                <dd class="col-sm-9">{{ asn.organization_name|default:"Not available" }}</dd>
+
+                <dt class="col-sm-3">Country</dt>
+                <dd class="col-sm-9">{{ asn.country|default:"Not available" }}</dd>
+
+                <dt class="col-sm-3">Contact Email</dt>
+                <dd class="col-sm-9">{{ asn.contact_email|default:"Not available" }}</dd>
+
+                <dt class="col-sm-3">Last Seen</dt>
+                <dd class="col-sm-9">{{ asn.last_seen|date:"Y-m-d H:i"|default:"Never" }}</dd>
+
+                <dt class="col-sm-3">First Registered</dt>
+                <dd class="col-sm-9">{{ asn.created_at|date:"Y-m-d H:i" }}</dd>
+            </dl>
+        </div>
+    </div>
+
+    <h3 class="mt-4">Related Advisories</h3>
+    <table class="table table-striped table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>Advisory #</th>
+                <th>Malware</th>
+                <th>Risk Level</th>
+                <th>Status</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for advisory in asn.advisories.all %}
+            <tr>
+                <td><a href="{% url 'threatintel:advisory-detail' advisory.pk %}">{{ advisory.advisory_number|default:"Draft" }}</a></td>
+                <td>{{ advisory.malware.malware_name }}</td>
+                <td>
+                    {% if advisory.malware.risk_level == "Critical" %}
+                        <span class="badge bg-danger">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "High" %}
+                        <span class="badge bg-warning text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% elif advisory.malware.risk_level == "Medium" %}
+                        <span class="badge bg-info text-dark">{{ advisory.malware.risk_level }}</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ advisory.malware.risk_level }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ advisory.status }}</td>
+                <td>{{ advisory.advisory_date }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="text-muted text-center">No advisories for this ASN.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3 class="mt-4">Recent Attack Events</h3>
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Fingerprint</th>
+                <th>Malware</th>
+                <th>IP</th>
+                <th>Dst IP</th>
+                <th>Dst Port</th>
+                <th>Detected</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in asn.events.all|slice:":20" %}
+            <tr>
+                <td><small class="text-muted">{{ event.fingerprint|truncatechars:40 }}</small></td>
+                <td>{{ event.malware.malware_name }}</td>
+                <td>{{ event.ip|default:"—" }}</td>
+                <td>{{ event.dst_ip|default:"—" }}</td>
+                <td>{{ event.dst_port|default:"—" }}</td>
+                <td>{{ event.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="text-muted text-center">No attack events recorded.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <a class="btn btn-secondary" href="{% url 'threatintel:asn-list' %}">Back to ASN List</a>
+</div>
+</body>
+</html>
+"""
+
+
+INTEL_ASN_LIST_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ASNs — CERT-BUND Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    <h1>Autonomous System Numbers</h1>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    <table class="table table-striped table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>ASN</th>
+                <th>Organization</th>
+                <th>Country</th>
+                <th>Last Seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for asn in asns %}
+            <tr>
+                <td><a href="{% url 'threatintel:asn-detail' asn.pk %}">{{ asn.asn_number }}</a></td>
+                <td>{{ asn.organization_name|default:"—" }}</td>
+                <td>{{ asn.country|default:"—" }}</td>
+                <td>{{ asn.last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" class="text-muted text-center">No ASN records found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <a class="btn btn-secondary" href="/">Back to Dashboard</a>
+</div>
+</body>
+</html>
+"""
+
+
+INTEL_DASHBOARD_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Threat Intelligence Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    <h1 class="mb-4">Threat Intelligence Dashboard</h1>
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">ASNs</h5>
+                    <p class="card-text fs-3">{{ total_asns }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">Advisories</h5>
+                    <p class="card-text fs-3">{{ total_advisories }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-primary" href="{% url 'threatintel:upload-csv' %}">Upload CSV</a>
+        <a class="btn btn-outline-secondary" href="{% url 'threatintel:asn-list' %}">ASNs</a>
+        <a class="btn btn-outline-secondary" href="{% url 'threatintel:advisory-list' %}">Advisories</a>
+    </div>
+</div>
+</body>
+</html>
+"""
+
+
+INTEL_UPLOAD_CSV_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Generate Advisories — CERT-BUND Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-4">
+    <h1>Generate Advisories from CSV</h1>
+    <p class="text-muted">Upload a CERT-Bund CSV file to generate advisories, email drafts, and enable the full advisory workflow.</p>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    <form method="post" enctype="multipart/form-data" class="mt-3">
+        {% csrf_token %}
+        <div class="mb-3">
+            {{ form.csv_file.label_tag }}
+            {{ form.csv_file }}
+        </div>
+        <button class="btn btn-primary" type="submit">Generate Advisories</button>
+        <a class="btn btn-secondary" href="/">Back to Dashboard</a>
+    </form>
+</div>
+</body>
+</html>
+"""
+
 # Django Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1616,6 +2530,7 @@ from django.conf import settings
 if not settings.configured:
     settings.configure(
         DEBUG=True,
+        BASE_DIR=BASE_DIR,
         SECRET_KEY='django-insecure-g7c6_h)9))3i+538%f!er@74%jn4sg3z%(o%u$5uak=5^*$e4(',
         ALLOWED_HOSTS=['*'],
         INSTALLED_APPS=[
@@ -1624,7 +2539,10 @@ if not settings.configured:
             'django.contrib.contenttypes',
             'django.contrib.sessions',
             'django.contrib.messages',
+            'django.contrib.staticfiles',
+            'threatintel',
             '__main__',
+            'malware_views',
         ],
         MIDDLEWARE=[
             'django.middleware.security.SecurityMiddleware',
@@ -1652,6 +2570,15 @@ if not settings.configured:
                     'analyzer/index.html':     INDEX_HTML,
                     'analyzer/upload.html':    UPLOAD_HTML,
                     'analyzer/dashboard.html': DASHBOARD_HTML,
+                    'analyzer/malware_list.html': MALWARE_LIST_HTML,
+                    'analyzer/malware_detail.html': MALWARE_DETAIL_HTML,
+                    'analyzer/malware_report.html': MALWARE_REPORT_HTML,
+                    'threatintel/advisory_detail.html': INTEL_ADVISORY_DETAIL_HTML,
+                    'threatintel/advisory_list.html': INTEL_ADVISORY_LIST_HTML,
+                    'threatintel/asn_detail.html': INTEL_ASN_DETAIL_HTML,
+                    'threatintel/asn_list.html': INTEL_ASN_LIST_HTML,
+                    'threatintel/dashboard.html': INTEL_DASHBOARD_HTML,
+                    'threatintel/upload_csv.html': INTEL_UPLOAD_CSV_HTML,
                 })],
             },
         }],
@@ -1664,6 +2591,7 @@ if not settings.configured:
         TIME_ZONE='UTC',
         USE_I18N=True,
         USE_TZ=True,
+        STATIC_URL='/static/',
         MEDIA_URL='/media/',
         MEDIA_ROOT=BASE_DIR / 'media',
         DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
@@ -1684,7 +2612,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.core.management import call_command
-from django.urls import path
+from django.urls import path, include
 from django.conf.urls.static import static
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1865,6 +2793,38 @@ def analyze(request):
         output_dir        = out_rel,
         status            = 'done',
     )
+
+    # ── Auto-create MalwareEntry records for malware found in this run ──
+    try:
+        from malware_views.models import MalwareEntry
+        from malware_views.report_generator import generate_malware_report
+
+        all_malware = set()
+        for row in stats.get('all_rows', []):
+            malware_name = row.get('malware', '').strip()
+            if malware_name:
+                all_malware.add(malware_name)
+
+        # Create entries for each malware
+        for malware_name in all_malware:
+            if malware_name:
+                entry, created = MalwareEntry.objects.get_or_create(
+                    name=malware_name,
+                    defaults={
+                        'first_seen_run_id': run.pk,
+                        'severity': 'unknown',
+                        'status': 'new'
+                    }
+                )
+                if created:
+                    # Generate intelligence report
+                    generate_malware_report(malware_name, entry, request.user)
+                    log.info(f"Auto-generated malware report for: {malware_name}")
+    except ImportError as e:
+        log.warning(f"Malware module not available: {e}")
+    except Exception as e:
+        log.error(f"Error creating malware entries: {e}")
+
     return redirect('dashboard', run_id=run.pk)
 
 
@@ -1914,6 +2874,8 @@ urlpatterns = [
     path('analyze/',                analyze,           name='analyze'),
     path('dashboard/<int:run_id>/', dashboard,         name='dashboard'),
     path('download/<int:run_id>/',  download_results,  name='download_results'),
+    path('malware/',                include('malware_views.urls')),
+    path('intel/',                  include('threatintel.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 
@@ -1934,6 +2896,20 @@ def bootstrap_db():
             with connection.schema_editor() as editor:
                 editor.create_model(model)
             print(f"[CERT-Bund] Table {table_name} created.")
+
+    # ── Create malware_views tables ──────────────────────────────────────────
+    try:
+        from malware_views.models import MalwareEntry, MalwareReport
+
+        for model in [MalwareEntry, MalwareReport]:
+            table_name = model._meta.db_table
+            if table_name not in connection.introspection.table_names():
+                print(f"[CERT-Bund] Creating table '{table_name}'…")
+                with connection.schema_editor() as editor:
+                    editor.create_model(model)
+                print(f"[CERT-Bund] Table {table_name} created.")
+    except ImportError as e:
+        print(f"[CERT-Bund] Malware views not available: {e}")
 
     # Ensure AnalysisRun table has the new fields
     with connection.cursor() as cursor:

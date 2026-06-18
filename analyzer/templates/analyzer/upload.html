@@ -1,0 +1,176 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}Upload — CERT-Bund Analyzer{% endblock %}
+
+{% block content %}
+<section class="upload-section">
+  <div class="upload-container">
+
+    <div class="upload-title">
+      <h1>Analyze Threat Data</h1>
+      <p>Drop a folder containing CERT-Bund CSV files to begin threat intelligence analysis.</p>
+    </div>
+
+    {% if error %}
+    <div class="error-banner" role="alert">
+      <span>⚠️</span>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form id="upload-form" method="POST" action="{% url 'analyze' %}"
+          enctype="multipart/form-data"
+          style="width:100%;display:flex;flex-direction:column;gap:1.25rem;">
+      {% csrf_token %}
+
+      <div id="drop-zone" class="drop-zone"
+           role="button" tabindex="0"
+           aria-label="Drop folder here or click to browse"
+           onclick="document.getElementById('folder-input').click()"
+           onkeydown="if(event.key==='Enter'||event.key===' '){document.getElementById('folder-input').click()}">
+        <span class="drop-icon" aria-hidden="true">📂</span>
+        <h3>Drop your folder here</h3>
+        <p>Drag and drop a folder containing CERT-Bund CSV files</p>
+        <button type="button" class="btn btn-ghost"
+                onclick="event.stopPropagation();document.getElementById('folder-input').click()">
+          📁 Browse Folder
+        </button>
+        <p class="hint">Supports folders with multiple .csv files • Max 500 MB</p>
+      </div>
+
+      <input type="file" id="folder-input" name="files"
+             multiple webkitdirectory directory accept=".csv"
+             aria-label="Select folder">
+
+      <div class="file-list" id="file-list">
+        <div class="file-list-header">
+          <h3>📄 Selected Files</h3>
+          <span class="file-count-badge" id="file-count">0 CSV files</span>
+        </div>
+        <div class="file-list-items" id="file-list-items" role="list"></div>
+      </div>
+
+      <label class="upload-options" for="osint-toggle" id="osint-label">
+        <div class="toggle-switch">
+          <input type="checkbox" id="osint-toggle" name="run_osint">
+          <span class="toggle-slider"></span>
+        </div>
+        <span class="toggle-label">
+          🔍 Threat Intelligence Search
+          <small>Run DuckDuckGo OSINT queries for unknown malware (takes longer)</small>
+        </span>
+      </label>
+
+      <div class="upload-options" style="flex-direction:column; align-items:flex-start; gap:0.5rem; cursor:default; margin-bottom:1.25rem;">
+        <span class="toggle-label" style="margin-left:0;">🛡️ AbuseIPDB Reputation (Optional)</span>
+        <input type="password" name="abuseipdb_key" placeholder="Enter AbuseIPDB API Key (Optional)" 
+               style="width:100%; padding:0.75rem; border:1px solid rgba(255,255,255,0.1); border-radius:0.5rem; background:rgba(0,0,0,0.2); color:white; font-family:inherit;">
+      </div>
+
+      <div class="upload-actions">
+        <button type="submit" class="btn btn-primary btn-lg btn-full"
+                id="analyze-btn" disabled>
+          🔬 Analyze
+        </button>
+        <button type="button" class="btn btn-ghost btn-full"
+                id="clear-btn" style="display:none;" onclick="clearFiles()">
+          ✕ Clear Selection
+        </button>
+      </div>
+    </form>
+
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const dropZone    = document.getElementById('drop-zone');
+  const folderInput = document.getElementById('folder-input');
+  const fileList    = document.getElementById('file-list');
+  const fileItems   = document.getElementById('file-list-items');
+  const fileCount   = document.getElementById('file-count');
+  const analyzeBtn  = document.getElementById('analyze-btn');
+  const clearBtn    = document.getElementById('clear-btn');
+  const form        = document.getElementById('upload-form');
+  let selectedFiles = [];
+
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const items = e.dataTransfer.items;
+    if (items) {
+      const files = [];
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+        if (entry) readEntry(entry, files);
+        else if (items[i].kind === 'file') {
+          const f = items[i].getAsFile();
+          if (f && f.name.toLowerCase().endsWith('.csv')) files.push(f);
+        }
+      }
+      setTimeout(() => updateFileList(files), 300);
+    }
+  });
+
+  function readEntry(entry, files) {
+    if (entry.isFile) {
+      entry.file((f) => { if (f.name.toLowerCase().endsWith('.csv')) files.push(f); });
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      reader.readEntries((entries) => entries.forEach((e) => readEntry(e, files)));
+    }
+  }
+
+  folderInput.addEventListener('change', function () {
+    updateFileList(Array.from(this.files).filter(f => f.name.toLowerCase().endsWith('.csv')));
+  });
+
+  function updateFileList(files) {
+    if (!files || files.length === 0) return;
+    selectedFiles = files;
+    fileCount.textContent = `${files.length} CSV file${files.length !== 1 ? 's' : ''}`;
+    fileItems.innerHTML   = '';
+    files.forEach((f) => {
+      const item = document.createElement('div');
+      item.className = 'file-item'; item.setAttribute('role', 'listitem');
+      item.innerHTML = `
+        <span class="file-item-icon" aria-hidden="true">📊</span>
+        <span class="file-item-name">${escHtml(f.name)}</span>
+        <span class="file-item-size">${formatSize(f.size)}</span>
+      `;
+      fileItems.appendChild(item);
+    });
+    fileList.classList.add('visible');
+    analyzeBtn.disabled    = false;
+    clearBtn.style.display = '';
+    dropZone.style.borderColor = 'var(--emerald)';
+  }
+
+  function clearFiles() {
+    selectedFiles = []; folderInput.value = '';
+    fileList.classList.remove('visible'); fileItems.innerHTML = '';
+    analyzeBtn.disabled = true; clearBtn.style.display = 'none';
+    dropZone.style.borderColor = '';
+  }
+  window.clearFiles = clearFiles;
+
+  form.addEventListener('submit', function () {
+    if (selectedFiles.length === 0) return;
+    analyzeBtn.disabled    = true;
+    analyzeBtn.textContent = '⏳ Analyzing…';
+    window.__showAnalyzeOverlay();
+  });
+
+  function formatSize(b) {
+    if (b < 1024)    return b + ' B';
+    if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    return (b/1048576).toFixed(1) + ' MB';
+  }
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+})();
+</script>
+{% endblock %}

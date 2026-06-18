@@ -1,0 +1,95 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}Login — CERT-Bund Analyzer{% endblock %}
+
+{% block content %}
+<div id="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title">
+  <div class="login-backdrop" aria-hidden="true"></div>
+  <div class="login-modal">
+    <div class="login-header">
+      <div class="login-logo" aria-hidden="true">🛡️</div>
+      <h1 class="login-title" id="login-title">Secure Access</h1>
+      <p class="login-subtitle">Sign in to access the CERT-Bund Analyzer</p>
+    </div>
+    <div class="login-body">
+      <div class="form-error" id="login-error" role="alert"></div>
+      <form id="login-form" novalidate>
+        {% csrf_token %}
+        <div class="form-group">
+          <label class="form-label" for="login-username">Username</label>
+          <input type="text" id="login-username" name="username" class="form-control"
+                 placeholder="Enter your username" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Password</label>
+          <input type="password" id="login-password" name="password" class="form-control"
+                 placeholder="Enter your password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn">
+          <span id="login-btn-text">Sign In</span>
+          <span id="login-spinner" style="display:none">⟳</span>
+        </button>
+      </form>
+      <p style="text-align:center;margin-top:1.25rem;font-size:0.78rem;color:var(--text-muted);">
+        Default credentials: <code style="color:var(--emerald);">admin</code> / <code style="color:var(--emerald);">admin123</code>
+      </p>
+    </div>
+  </div>
+</div>
+
+<div style="filter:blur(8px);opacity:0.35;min-height:100vh;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+  <div style="text-align:center;padding:3rem;">
+    <div style="font-size:5rem;margin-bottom:1rem;opacity:0.5;">🛡️</div>
+    <div style="font-size:2rem;font-weight:800;color:var(--text-primary);margin-bottom:0.5rem;">CERT-Bund Analyzer</div>
+    <div style="color:var(--text-muted);font-size:1rem;">Network Threat Intelligence Platform</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const form    = document.getElementById('login-form');
+  const errBox  = document.getElementById('login-error');
+  const btnText = document.getElementById('login-btn-text');
+  const spinner = document.getElementById('login-spinner');
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    errBox.style.display = 'none';
+    btnText.textContent  = 'Signing in…';
+    spinner.style.display = 'inline-block';
+    spinner.style.animation = 'spin 1s linear infinite';
+
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const csrf     = form.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    try {
+      const res  = await fetch('/login/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username, password, csrfmiddlewaretoken: csrf }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        window.location.href = '/';
+      } else {
+        errBox.textContent   = data.error || 'Login failed. Please try again.';
+        errBox.style.display = 'block';
+      }
+    } catch (err) {
+      errBox.textContent   = 'Network error. Please check your connection.';
+      errBox.style.display = 'block';
+    } finally {
+      btnText.textContent   = 'Sign In';
+      spinner.style.display = 'none';
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') form.dispatchEvent(new Event('submit', {bubbles:true,cancelable:true}));
+  });
+})();
+</script>
+{% endblock %}

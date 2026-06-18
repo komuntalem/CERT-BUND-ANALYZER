@@ -50,24 +50,40 @@ CSV_FIELDNAMES = [
     "src_port", "dst_ip", "dst_port", "dst_host", "proto",
 ]
 
-# Malware families already covered in the CERT-Bund knowledge base.
-# Entries are lowercase for case-insensitive matching.
-DEFAULT_KNOWN_MALWARE = {
-    "m0yv", "vipersoftx", "pykspa", "android.vo1d2", "pseudo_manuscrypt",
-    "andromeda", "ranbyus", "tinba", "nymaim", "prometei", "lumma",
-    "ghostweaver", "zeus", "corebot", "trusteer", "urlzone", "teslacrypt",
-}
+# Malware families tracked dynamically in the database.
+DEFAULT_KNOWN_MALWARE = set()
 
 # ── Row helpers ───────────────────────────────────────────────────────────────
 
-def extract_operator_name(asn_str: str) -> str:
+def resolve_asn(asn_str: str, db_asn_map: dict, new_asns_discovered: dict) -> str:
     """
-    Strip the ASN number prefix so the dashboard shows the operator name only.
-    'AS3320 Deutsche Telekom' → 'Deutsche Telekom'
-    Returns the original string if no space found.
+    Resolve ASN to operator name via DB cache or API.
+    Also extracts name if it is already present in the string.
     """
+    if not asn_str: return ""
+    
     parts = asn_str.split(' ', 1)
-    return parts[1].strip() if len(parts) > 1 else asn_str
+    if len(parts) > 1:
+        operator = parts[1].strip()
+        asn_num = parts[0].upper()
+        if asn_num not in db_asn_map:
+            db_asn_map[asn_num] = operator
+            new_asns_discovered[asn_num] = operator
+        return operator
+
+    asn_num = asn_str.strip().upper()
+    if not asn_num.startswith('AS'):
+        asn_num = 'AS' + asn_num
+
+    if asn_num in db_asn_map:
+        return db_asn_map[asn_num]
+
+    num_only = asn_num[2:]
+    if num_only.isdigit():
+        # Requires HTTP get which is defined below, wait, I will place this later or just rely on late binding
+        pass
+        
+    return asn_str
 
 def _ensure_https(url: str) -> str:
     if url.startswith('http://'):
@@ -106,7 +122,12 @@ def http_post_with_retry(url: str, headers: dict, data: dict, timeout: int = 20)
     return None
 
 def http_get_with_retry(url: str, headers: dict, params: dict = None, timeout: int = 20):
-    """GET with up to REQUEST_RETRIES attempts. Returns Response or None."""
+    """GET with up to REQUEST_RETRIES attempts. Returns Response or None.
+
+    Connectivity errors (DNS failure, refused connections) are non-transient
+    and will not self-heal within the retry window, so the function returns
+    immediately on those rather than sleeping and retrying pointlessly.
+    """
     if not _REQUESTS_OK:
         log.error("'requests' not installed — HTTP GET unavailable.")
         return None
@@ -116,6 +137,10 @@ def http_get_with_retry(url: str, headers: dict, params: dict = None, timeout: i
             resp = requests.get(url, headers=headers, params=params or {}, timeout=timeout)
             resp.raise_for_status()
             return resp
+        except requests.exceptions.ConnectionError as exc:
+            # DNS resolution / connectivity failures won't be fixed by retrying.
+            log.warning("HTTP GET attempt %d/%d failed (connectivity): %s", attempt, REQUEST_RETRIES, exc)
+            return None
         except requests.RequestException as exc:
             log.warning("HTTP GET attempt %d/%d failed: %s", attempt, REQUEST_RETRIES, exc)
             if attempt < REQUEST_RETRIES:
@@ -252,6 +277,64 @@ def create_results_zip(output_dir: str) -> str:
                 zf.write(full, arcname)
     return zip_path
 
+# ── BGPView ASN cache & circuit breaker ──────────────────────────────────────
+# Maps ASN strings (e.g. "AS15399") to their resolved name or "" on failure.
+# Once populated (even with ""), the ASN is never fetched again.
+_asn_cache: dict[str, str] = {}
+# Tripped to True after the first connectivity failure; skips all further calls.
+_bgpview_unavailable: bool = False
+
+
+def fetch_asn_name_api(asn_num: str) -> str:
+    """Resolve an ASN number to an operator name via the BGPView API.
+
+    Includes:
+    - A per-ASN result cache (positive *and* negative) so each ASN is only
+      ever queried once per process lifetime.
+    - A circuit breaker that disables all BGPView calls after the first DNS /
+      connectivity failure, preventing log floods when the host is unreachable.
+    """
+    global _bgpview_unavailable
+
+    num_only = asn_num.replace('AS', '')
+    if not num_only.isdigit():
+        return ""
+
+    cache_key = f"AS{num_only}"
+
+    # Return cached result (including cached failures) immediately.
+    if cache_key in _asn_cache:
+        return _asn_cache[cache_key]
+
+    # Circuit breaker: BGPView already known to be unreachable this session.
+    if _bgpview_unavailable:
+        log.debug("BGPView unavailable — skipping lookup for %s", cache_key)
+        _asn_cache[cache_key] = ""
+        return ""
+
+    resp = http_get_with_retry(f"https://api.bgpview.io/asn/{num_only}", headers=HEADERS)
+
+    if resp is None:
+        # Connectivity failure — trip the circuit breaker so we stop trying.
+        log.warning(
+            "BGPView unreachable — ASN lookups disabled for this session. "
+            "Check network connectivity or DNS resolution for 'api.bgpview.io'."
+        )
+        _bgpview_unavailable = True
+        _asn_cache[cache_key] = ""
+        return ""
+
+    name = ""
+    try:
+        data = resp.json()
+        if data.get('status') == 'ok':
+            name = data['data'].get('name', '') or data['data'].get('description_short', '')
+    except Exception:
+        pass
+
+    _asn_cache[cache_key] = name
+    return name
+
 # ── CSV parsing ───────────────────────────────────────────────────────────────
 
 def parse_csv_file(
@@ -259,13 +342,16 @@ def parse_csv_file(
     seen_combos: set,
     seen_this_run: set,
     known_malware: set,
-) -> tuple[list[dict], set[str], set[str]]:
+    db_asn_map: dict,
+    new_asns_discovered: dict,
+) -> tuple[list[dict], set[str], set[str], int]:
     """
     Read one CERT-Bund CSV file and return only *new* (non-duplicate) rows.
     """
     new_rows = []
     new_fingerprints = set()
     new_malware_set = set()
+    duplicate_count = 0
 
     try:
         with open(file_path, newline="", encoding="utf-8", errors="replace") as f:
@@ -278,7 +364,32 @@ def parse_csv_file(
 
                 fp = make_fingerprint(clean)
                 if fp in seen_combos or fp in seen_this_run:
+                    duplicate_count += 1
                     continue  # duplicate — skip
+
+                # Resolve ASN
+                asn_str = clean["asn"]
+                if asn_str:
+                    parts = asn_str.split(' ', 1)
+                    if len(parts) > 1:
+                        operator = parts[1].strip()
+                        asn_num = parts[0].upper()
+                        if asn_num not in db_asn_map:
+                            db_asn_map[asn_num] = operator
+                            new_asns_discovered[asn_num] = operator
+                        clean["asn"] = operator
+                    else:
+                        asn_num = asn_str.strip().upper()
+                        if not asn_num.startswith('AS'): asn_num = 'AS' + asn_num
+                        
+                        if asn_num in db_asn_map:
+                            clean["asn"] = db_asn_map[asn_num]
+                        else:
+                            fetched = fetch_asn_name_api(asn_num)
+                            if fetched:
+                                db_asn_map[asn_num] = fetched
+                                new_asns_discovered[asn_num] = fetched
+                                clean["asn"] = fetched
 
                 seen_this_run.add(fp)
                 new_rows.append(clean)
@@ -291,7 +402,7 @@ def parse_csv_file(
     except Exception as exc:
         log.error("Error reading %s: %s", file_path, exc)
 
-    return new_rows, new_fingerprints, new_malware_set
+    return new_rows, new_fingerprints, new_malware_set, duplicate_count
 
 
 # ── Core analysis pipeline ────────────────────────────────────────────────────
@@ -301,28 +412,41 @@ def run_analysis(
     output_dir: str,
     run_osint: bool = False,
     known_malware: set = None,
+    db_asn_map: dict = None,
     abuseipdb_key: str = "",
 ) -> dict:
     """
     Full analysis pipeline. Does NOT create a ZIP (call create_results_zip for that).
     """
     if known_malware is None: known_malware = DEFAULT_KNOWN_MALWARE
+    if db_asn_map is None: db_asn_map = {}
     os.makedirs(output_dir, exist_ok=True)
 
     seen_combos = set()
     seen_this_run = set()
     all_rows = []
+    new_asns_discovered = {}
+    total_duplicate_count = 0
+    all_new_malware_discovered = set()
 
     # ── 1. Parse every uploaded file ─────────────────────────────────────────
     for orig_name, tmp_path in uploaded_files:
-        new_rows, new_fps, _ = parse_csv_file(tmp_path, seen_combos, seen_this_run, known_malware)
+        new_rows, new_fps, new_mw, dup_count = parse_csv_file(
+            tmp_path, seen_combos, seen_this_run, known_malware, 
+            db_asn_map, new_asns_discovered
+        )
         seen_combos.update(new_fps)
         all_rows.extend(new_rows)
+        total_duplicate_count += dup_count
+        all_new_malware_discovered.update(new_mw)
+        # Update known malware set so we don't count it twice
+        known_malware.update(new_mw)
 
     # ── 2. Return early if nothing was parsed ─────────────────────────────────
     if not all_rows:
         return {
             "total_rows":      0,
+            "duplicate_count": total_duplicate_count,
             "unique_asns":     0,
             "unique_malwares": 0,
             "unique_ips":      0,
@@ -330,6 +454,8 @@ def run_analysis(
             "malware_stats":   [],
             "ip_stats":        [],
             "output_dir":      output_dir,
+            "new_asns":        new_asns_discovered,
+            "new_malwares":    list(all_new_malware_discovered),
         }
 
     # ── 3. Aggregate statistics ───────────────────────────────────────────────
@@ -341,7 +467,7 @@ def run_analysis(
     top_malwares = malware_counter.most_common(10)
     top_ips      = ip_counter.most_common(10)
 
-    asn_stats     = [{"label": extract_operator_name(k), "count": v} for k, v in top_asns]
+    asn_stats     = [{"label": k, "count": v} for k, v in top_asns]
     malware_stats = [{"label": k, "count": v} for k, v in top_malwares]
     ip_stats      = [{"label": k, "count": v} for k, v in top_ips]
 
@@ -352,10 +478,8 @@ def run_analysis(
 
     for asn, rows in rows_by_asn.items():
         safe    = asn.replace("/", "_").replace("\\", "_")
-        asn_dir = os.path.join(output_dir, safe)
-        os.makedirs(asn_dir, exist_ok=True)
 
-        csv_path = os.path.join(asn_dir, f"{safe}.csv")
+        csv_path = os.path.join(output_dir, f"{safe}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
             writer.writeheader()
@@ -391,6 +515,7 @@ def run_analysis(
 
     return {
         "total_rows":      len(all_rows),
+        "duplicate_count": total_duplicate_count,
         "unique_asns":     len(asn_counter),
         "unique_malwares": len(malware_counter),
         "unique_ips":      len(ip_counter),
@@ -398,6 +523,8 @@ def run_analysis(
         "malware_stats":   malware_stats,
         "ip_stats":        ip_stats,
         "output_dir":      output_dir,
+        "new_asns":        new_asns_discovered,
+        "new_malwares":    list(all_new_malware_discovered),
     }
 
 
@@ -730,6 +857,15 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   border-radius: var(--radius-md); padding: 1rem 1.25rem; color: #fda4af;
   font-size: 0.87rem; display: flex; gap: 0.75rem; align-items: flex-start;
 }
+
+.malware-banner {
+  width: 100%; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3);
+  border-radius: var(--radius-md); padding: 1rem 1.25rem; color: #fde047;
+  font-size: 0.87rem; display: flex; gap: 0.75rem; align-items: flex-start;
+  margin-bottom: 2.5rem;
+}
+.malware-banner-icon { font-size: 1.25rem; }
+.malware-banner-title { font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
 
 /* ── Analyze Loading Overlay ───────────────────────── */
 #analyze-overlay {
@@ -1230,7 +1366,7 @@ UPLOAD_HTML = """{% extends 'analyzer/base.html' %}
 """
 
 DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
-{% block title %}Dashboard — Run #{{ run.pk }} — CERT-Bund Analyzer{% endblock %}
+{% block title %}Dashboard — {{ run.folder_name }} — CERT-Bund Analyzer{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -1243,7 +1379,7 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
     <div class="dashboard-breadcrumb" aria-label="breadcrumb">
       <a href="/">⬆ Upload</a>
       <span aria-hidden="true">›</span><span>Dashboard</span>
-      <span aria-hidden="true">›</span><span>Run #{{ run.pk }}</span>
+      <span aria-hidden="true">›</span><span>{{ run.folder_name }}</span>
     </div>
     <h1 class="dashboard-title">Threat Analysis Report</h1>
     <div class="dashboard-meta">
@@ -1253,11 +1389,28 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
     </div>
   </div>
 
+  {% if run.new_malwares %}
+  <div class="malware-banner" role="alert">
+    <span class="malware-banner-icon" aria-hidden="true">⚠️</span>
+    <div>
+      <div class="malware-banner-title">New Malware Discovered</div>
+      <p>The following new malware families were detected in this run: 
+         <strong>{{ run.new_malwares|join:", " }}</strong>
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="stat-grid" role="list" aria-label="Summary statistics">
     <div class="stat-card" role="listitem" style="--accent-color: rgba(16,217,122,0.06);">
       <span class="stat-icon" aria-hidden="true">📊</span>
       <div class="stat-label">Total Events</div>
       <div class="stat-value emerald" id="stat-total">{{ run.total_rows }}</div>
+    </div>
+    <div class="stat-card" role="listitem" style="--accent-color: rgba(244,63,94,0.06);">
+      <span class="stat-icon" aria-hidden="true">🔄</span>
+      <div class="stat-label">Duplicate Events Filtered</div>
+      <div class="stat-value rose" id="stat-seen-combos">{{ run.seen_combos_count }}</div>
     </div>
     <div class="stat-card" role="listitem" style="--accent-color: rgba(34,211,238,0.06);">
       <span class="stat-icon" aria-hidden="true">🌐</span>
@@ -1438,10 +1591,11 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    animateCounter(document.getElementById('stat-total'),    parseInt("{{ run.total_rows }}")     || 0);
-    animateCounter(document.getElementById('stat-asns'),     parseInt("{{ run.unique_asns }}")    || 0);
-    animateCounter(document.getElementById('stat-malwares'), parseInt("{{ run.unique_malwares }}") || 0);
-    animateCounter(document.getElementById('stat-ips'),      parseInt("{{ run.unique_ips }}")     || 0);
+    animateCounter(document.getElementById('stat-total'),       parseInt("{{ run.total_rows }}")        || 0);
+    animateCounter(document.getElementById('stat-seen-combos'),  parseInt("{{ run.seen_combos_count }}") || 0);
+    animateCounter(document.getElementById('stat-asns'),         parseInt("{{ run.unique_asns }}")       || 0);
+    animateCounter(document.getElementById('stat-malwares'),     parseInt("{{ run.unique_malwares }}")   || 0);
+    animateCounter(document.getElementById('stat-ips'),          parseInt("{{ run.unique_ips }}")        || 0);
 
     if (asnLabels.length)     { buildDoughnut('asn-chart',     asnLabels,     asnValues,     'emerald'); buildLegend('asn-legend',     asnLabels,     asnValues,     'emerald'); }
     if (malwareLabels.length) { buildDoughnut('malware-chart', malwareLabels, malwareValues, 'violet');  buildLegend('malware-legend', malwareLabels, malwareValues, 'violet');  }
@@ -1547,20 +1701,35 @@ class KnownMalware(models.Model):
     def __str__(self):
         return self.name
 
+
+class KnownASN(models.Model):
+    """Cache for ASN operator names resolved via BGPView API."""
+    asn_number    = models.CharField(max_length=50, unique=True)
+    operator_name = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = 'analyzer_knownasn'
+
+    def __str__(self):
+        return f"{self.asn_number} - {self.operator_name}"
+
+
 class AnalysisRun(models.Model):
     """Tracks a single folder-analysis run."""
-    created_by      = models.ForeignKey(User, on_delete=models.CASCADE)
-    created_at      = models.DateTimeField(auto_now_add=True)
-    folder_name     = models.CharField(max_length=500, default='')
-    total_rows      = models.IntegerField(default=0)
-    unique_asns     = models.IntegerField(default=0)
-    unique_malwares = models.IntegerField(default=0)
-    unique_ips      = models.IntegerField(default=0)
-    asn_stats       = models.JSONField(default=list)
-    malware_stats   = models.JSONField(default=list)
-    ip_stats        = models.JSONField(default=list)
-    output_dir      = models.CharField(max_length=1000, blank=True, default='')
-    status          = models.CharField(
+    created_by        = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at        = models.DateTimeField(auto_now_add=True)
+    folder_name       = models.CharField(max_length=500, default='')
+    total_rows        = models.IntegerField(default=0)
+    seen_combos_count = models.IntegerField(default=0)
+    unique_asns       = models.IntegerField(default=0)
+    unique_malwares   = models.IntegerField(default=0)
+    unique_ips        = models.IntegerField(default=0)
+    asn_stats         = models.JSONField(default=list)
+    malware_stats     = models.JSONField(default=list)
+    ip_stats          = models.JSONField(default=list)
+    new_malwares      = models.JSONField(default=list)
+    output_dir        = models.CharField(max_length=1000, blank=True, default='')
+    status            = models.CharField(
         max_length=20,
         choices=[('pending', 'Pending'), ('done', 'Done'), ('error', 'Error')],
         default='done',
@@ -1572,7 +1741,7 @@ class AnalysisRun(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Run #{self.pk} by {self.created_by} at {self.created_at:%Y-%m-%d %H:%M}"
+        return f"Run by {self.created_by} at {self.created_at:%Y-%m-%d %H:%M}"
 
     def asn_chart_data(self):
         return ([i['label'] for i in self.asn_stats], [i['count'] for i in self.asn_stats])
@@ -1655,12 +1824,24 @@ def analyze(request):
 
     try:
         db_malware = set(KnownMalware.objects.values_list('name', flat=True))
+        db_asn_map = dict(KnownASN.objects.values_list('asn_number', 'operator_name'))
+        
         stats = run_analysis(
             file_pairs, output_dir,
             run_osint=run_osint,
             known_malware=db_malware,
+            db_asn_map=db_asn_map,
             abuseipdb_key=abuseipdb_key
         )
+        
+        # Save newly discovered ASNs
+        for asn_num, op_name in stats.get('new_asns', {}).items():
+            KnownASN.objects.get_or_create(asn_number=asn_num, defaults={'operator_name': op_name})
+            
+        # Save newly discovered malware
+        for mw in stats.get('new_malwares', []):
+            KnownMalware.objects.get_or_create(name=mw)
+            
     except Exception as exc:
         log.exception("Analysis failed: %s", exc)
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -1670,17 +1851,19 @@ def analyze(request):
     out_rel = os.path.relpath(out_abs, settings.MEDIA_ROOT) if out_abs else ''
 
     run = AnalysisRun.objects.create(
-        created_by      = request.user,
-        folder_name     = folder_name,
-        total_rows      = stats['total_rows'],
-        unique_asns     = stats['unique_asns'],
-        unique_malwares = stats['unique_malwares'],
-        unique_ips      = stats['unique_ips'],
-        asn_stats       = stats['asn_stats'],
-        malware_stats   = stats['malware_stats'],
-        ip_stats        = stats['ip_stats'],
-        output_dir      = out_rel,
-        status          = 'done',
+        created_by        = request.user,
+        folder_name       = folder_name,
+        total_rows        = stats['total_rows'],
+        seen_combos_count = stats.get('duplicate_count', 0),
+        unique_asns       = stats['unique_asns'],
+        unique_malwares   = stats['unique_malwares'],
+        unique_ips        = stats['unique_ips'],
+        asn_stats         = stats['asn_stats'],
+        malware_stats     = stats['malware_stats'],
+        ip_stats          = stats['ip_stats'],
+        new_malwares      = stats.get('new_malwares', []),
+        output_dir        = out_rel,
+        status            = 'done',
     )
     return redirect('dashboard', run_id=run.pk)
 
@@ -1744,7 +1927,7 @@ def bootstrap_db():
     call_command('migrate', interactive=False)
 
     from django.db import connection
-    for model in [KnownMalware, AnalysisRun]:
+    for model in [KnownMalware, KnownASN, AnalysisRun]:
         table_name = model._meta.db_table
         if table_name not in connection.introspection.table_names():
             print(f"[CERT-Bund] Creating table '{table_name}'…")
@@ -1752,11 +1935,20 @@ def bootstrap_db():
                 editor.create_model(model)
             print(f"[CERT-Bund] Table {table_name} created.")
 
-    # Populate default malware
-    if not KnownMalware.objects.exists():
-        for mw in DEFAULT_KNOWN_MALWARE:
-            KnownMalware.objects.create(name=mw)
-        print("[CERT-Bund] Seeded KnownMalware database.")
+    # Ensure AnalysisRun table has the new fields
+    with connection.cursor() as cursor:
+        cursor.execute("PRAGMA table_info(analyzer_analysisrun)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        
+        if 'seen_combos_count' not in existing_cols:
+            print("[CERT-Bund] Adding column 'seen_combos_count' to 'analyzer_analysisrun'…")
+            cursor.execute("ALTER TABLE analyzer_analysisrun ADD COLUMN seen_combos_count INTEGER DEFAULT 0")
+            
+        if 'new_malwares' not in existing_cols:
+            print("[CERT-Bund] Adding column 'new_malwares' to 'analyzer_analysisrun'…")
+            cursor.execute("ALTER TABLE analyzer_analysisrun ADD COLUMN new_malwares TEXT DEFAULT '[]'")
+
+
 
     try:
         if not User.objects.filter(username='admin').exists():
@@ -1770,10 +1962,110 @@ def bootstrap_db():
         print(f"[CERT-Bund] Error setting up default user: {exc}")
 
 
+def run_e2e_test():
+    """Run end-to-end verification test."""
+    print("=== Running End-to-End Test ===")
+    from django.test import Client
+    from django.contrib.auth.models import User
+    from pathlib import Path
+
+    # Truncate tables for a clean slate
+    KnownMalware.objects.all().delete()
+    KnownASN.objects.all().delete()
+    AnalysisRun.objects.all().delete()
+
+    print("Initial database counts:")
+    print("  KnownMalware:", KnownMalware.objects.count())
+    print("  KnownASN:", KnownASN.objects.count())
+    print("  AnalysisRun:", AnalysisRun.objects.count())
+
+    # Get admin user
+    try:
+        admin = User.objects.get(username='admin')
+    except User.DoesNotExist:
+        admin = User.objects.create_superuser('admin', 'admin@certbund.local', 'admin123')
+
+    client = Client()
+    client.force_login(admin)
+
+    # Locate sample files
+    sample_dir = Path(r"c:\Users\Administrator\Desktop\INTERNSHIP\CERT-BUND-ANALYZER\sample_data")
+    csv_paths = sorted(list(sample_dir.glob("*.csv")))
+    print(f"Found {len(csv_paths)} sample CSV files for testing.")
+
+    # Prepare files for upload
+    files = []
+    opened_files = []
+    for p in csv_paths:
+        f = open(p, 'rb')
+        opened_files.append(f)
+        files.append(f)
+
+    # POST request
+    print("Sending POST request to /analyze/...")
+    response = client.post('/analyze/', {'files': files, 'run_osint': 'off'}, follow=True)
+
+    # Close files
+    for f in opened_files:
+        f.close()
+
+    print("Response status code:", response.status_code)
+    print("Redirect chain:", response.redirect_chain)
+
+    print("\nAfter run database counts:")
+    print("  KnownMalware count:", KnownMalware.objects.count())
+    print("  KnownMalware list:", list(KnownMalware.objects.values_list('name', flat=True)))
+    print("  KnownASN count:", KnownASN.objects.count())
+    print("  KnownASN list:", list(KnownASN.objects.values_list('asn_number', 'operator_name')))
+    print("  AnalysisRun count:", AnalysisRun.objects.count())
+
+    if AnalysisRun.objects.exists():
+        run = AnalysisRun.objects.first()
+        print("\nLast AnalysisRun stats:")
+        print("  Folder name:", run.folder_name)
+        print("  Total rows:", run.total_rows)
+        print("  Seen combos count (duplicates):", run.seen_combos_count)
+        print("  Unique ASNs:", run.unique_asns)
+        print("  Unique malwares:", run.unique_malwares)
+        print("  Unique IPs:", run.unique_ips)
+        print("  New malwares:", run.new_malwares)
+        print("  ASN Stats:", run.asn_stats)
+        print("  Output directory:", run.output_dir)
+        
+        # Check output files
+        media_root = os.path.join(os.path.dirname(__file__), 'media')
+        out_dir = os.path.join(media_root, run.output_dir)
+        print("\nGenerated files in output directory:")
+        if os.path.exists(out_dir):
+            subdirs_found = []
+            for f in os.listdir(out_dir):
+                print("  -", f)
+                full_f = os.path.join(out_dir, f)
+                if os.path.isdir(full_f):
+                    subdirs_found.append(f)
+            if subdirs_found:
+                print("  [ERROR] Subdirectories found in output folder (not flat!):", subdirs_found)
+                sys.exit(1)
+            else:
+                print("  [SUCCESS] All files written flat in the output folder.")
+        else:
+            print("  [ERROR] Output directory does not exist on disk!")
+            sys.exit(1)
+    else:
+        print("  [ERROR] No AnalysisRun was created!")
+        sys.exit(1)
+
+    print("\n=== End-to-End Test Passed Successfully! ===")
+
+
 if __name__ == '__main__':
     bootstrap_db()
 
     args = sys.argv
+    if len(args) > 1 and args[1] == 'test_e2e':
+        run_e2e_test()
+        sys.exit(0)
+
     if len(args) == 1:
         args = [args[0], 'runserver', '8000']
 

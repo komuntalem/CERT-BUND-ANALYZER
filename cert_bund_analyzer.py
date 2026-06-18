@@ -330,6 +330,7 @@ def run_analysis(
             "malware_stats":   [],
             "ip_stats":        [],
             "output_dir":      output_dir,
+            "all_rows":        [],
         }
 
     # ── 3. Aggregate statistics ───────────────────────────────────────────────
@@ -398,6 +399,7 @@ def run_analysis(
         "malware_stats":   malware_stats,
         "ip_stats":        ip_stats,
         "output_dir":      output_dir,
+        "all_rows":        all_rows,
     }
 
 
@@ -800,6 +802,7 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   border-radius: var(--radius-lg); padding: 1.5rem 1.75rem;
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   transition: var(--transition); position: relative; overflow: hidden;
+  cursor: default;
 }
 .stat-card::before {
   content: ''; position: absolute; top: -50%; left: -50%;
@@ -809,6 +812,8 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 }
 .stat-card:hover::before { opacity: 1; }
 .stat-card:hover { border-color: rgba(255,255,255,0.12); transform: translateY(-3px); }
+.stat-card.clickable { cursor: pointer; }
+.stat-card.clickable:hover { border-color: var(--violet); box-shadow: 0 0 30px rgba(167,139,250,0.15); }
 .stat-icon { font-size: 1.5rem; margin-bottom: 1rem; display: block; }
 .stat-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.3rem; }
 .stat-value { font-size: 2.2rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; letter-spacing: -0.04em; color: var(--text-primary); }
@@ -827,6 +832,8 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   box-shadow: 0 0 40px rgba(16,217,122,0.08), 0 4px 32px rgba(0,0,0,0.4);
   border-color: rgba(255,255,255,0.1);
 }
+.chart-card.clickable { cursor: pointer; }
+.chart-card.clickable:hover { border-color: var(--violet); box-shadow: 0 0 40px rgba(167,139,250,0.15); }
 .chart-card-header { margin-bottom: 1.5rem; }
 .chart-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem; }
 .chart-card-subtitle { font-size: 0.78rem; color: var(--text-muted); }
@@ -860,6 +867,29 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   color: #fff; box-shadow: 0 0 20px rgba(167,139,250,0.3);
 }
 .btn-download:hover { transform: translateY(-2px); box-shadow: 0 0 32px rgba(167,139,250,0.5); }
+
+/* ── Malware Summary Tags ──────────────────────────── */
+.malware-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(167,139,250,0.08);
+  color: var(--violet);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid rgba(167,139,250,0.12);
+  transition: var(--transition);
+}
+.malware-tag:hover {
+  background: rgba(167,139,250,0.15);
+  border-color: rgba(167,139,250,0.3);
+}
+.malware-tag .count {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+}
 
 /* ── Utility ────────────────────────────────────────── */
 .text-emerald { color: var(--emerald); }
@@ -920,6 +950,9 @@ BASE_HTML = f"""<!DOCTYPE html>
       </a>
       <div class="navbar-actions">
         {{% if user.is_authenticated %}}
+          <a href="{{% url 'malware_list' %}}" class="btn btn-ghost" style="padding:0.4rem 1rem; border-color:rgba(167,139,250,0.2);">
+            🦠 Malware
+          </a>
           <div class="user-badge">
             <span class="dot" aria-hidden="true"></span>
             <span>{{{{ user.username }}}}</span>
@@ -1264,9 +1297,9 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       <div class="stat-label">Unique ASNs</div>
       <div class="stat-value cyan" id="stat-asns">{{ run.unique_asns }}</div>
     </div>
-    <div class="stat-card" role="listitem" style="--accent-color: rgba(167,139,250,0.06);">
+    <div class="stat-card clickable" role="listitem" style="--accent-color: rgba(167,139,250,0.06);" onclick="window.location.href='{% url 'malware_list' %}'">
       <span class="stat-icon" aria-hidden="true">🦠</span>
-      <div class="stat-label">Malware Families</div>
+      <div class="stat-label">Malware Families <span style="font-size:0.6rem;color:var(--violet);">↗</span></div>
       <div class="stat-value violet" id="stat-malwares">{{ run.unique_malwares }}</div>
     </div>
     <div class="stat-card" role="listitem" style="--accent-color: rgba(245,158,11,0.06);">
@@ -1297,10 +1330,16 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       {% endif %}
     </div>
 
-    <div class="chart-card">
-      <div class="chart-card-header">
-        <div class="chart-card-title">🦠 Detected Malwares</div>
-        <div class="chart-card-subtitle">Top {{ run.malware_stats|length }} malware families observed</div>
+    <!-- MALWARE CHART CARD - Clickable with Summary -->
+    <div class="chart-card clickable" onclick="window.location.href='{% url 'malware_list' %}'">
+      <div class="chart-card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div class="chart-card-title">🦠 Detected Malwares</div>
+          <div class="chart-card-subtitle">Top {{ run.malware_stats|length }} malware families observed</div>
+        </div>
+        <a href="{% url 'malware_list' %}" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem; border-color:rgba(167,139,250,0.3);" onclick="event.stopPropagation();">
+          View All →
+        </a>
       </div>
       {% if run.malware_stats %}
         <div class="chart-container" style="height:280px;">
@@ -1311,6 +1350,26 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
           </div>
         </div>
         <div class="chart-legend" id="malware-legend" aria-label="Malware legend"></div>
+        
+        <!-- Recent Malware Summary -->
+        <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--border);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+            <span style="font-size:0.7rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em;">Recent Detections</span>
+            <span style="font-size:0.65rem; color:var(--text-muted);">Click card to view all</span>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+            {% for malware in run.malware_stats|slice:":5" %}
+              <span class="malware-tag">
+                {{ malware.label }} <span class="count">({{ malware.count }})</span>
+              </span>
+            {% endfor %}
+            {% if run.malware_stats|length > 5 %}
+              <span style="background:rgba(255,255,255,0.05); color:var(--text-muted); border-radius:999px; padding:0.2rem 0.6rem; font-size:0.7rem; border:1px solid var(--border);">
+                +{{ run.malware_stats|length|add:"-5" }} more
+              </span>
+            {% endif %}
+          </div>
+        </div>
       {% else %}
         <div class="no-data-state"><div class="icon" aria-hidden="true">🦠</div><p>No malware data available</p></div>
       {% endif %}
@@ -1471,6 +1530,7 @@ if not settings.configured:
             'django.contrib.sessions',
             'django.contrib.messages',
             '__main__',
+            'malware_views',
         ],
         MIDDLEWARE=[
             'django.middleware.security.SecurityMiddleware',
@@ -1484,7 +1544,7 @@ if not settings.configured:
         ROOT_URLCONF='__main__',
         TEMPLATES=[{
             'BACKEND': 'django.template.backends.django.DjangoTemplates',
-            'DIRS': [],
+            'DIRS': [BASE_DIR / 'templates'],
             'APP_DIRS': False,
             'OPTIONS': {
                 'context_processors': [
@@ -1493,12 +1553,15 @@ if not settings.configured:
                     'django.contrib.auth.context_processors.auth',
                     'django.contrib.messages.context_processors.messages',
                 ],
-                'loaders': [('django.template.loaders.locmem.Loader', {
-                    'analyzer/base.html':      BASE_HTML,
-                    'analyzer/index.html':     INDEX_HTML,
-                    'analyzer/upload.html':    UPLOAD_HTML,
-                    'analyzer/dashboard.html': DASHBOARD_HTML,
-                })],
+                'loaders': [
+                    ('django.template.loaders.locmem.Loader', {
+                        'analyzer/base.html':      BASE_HTML,
+                        'analyzer/index.html':     INDEX_HTML,
+                        'analyzer/upload.html':    UPLOAD_HTML,
+                        'analyzer/dashboard.html': DASHBOARD_HTML,
+                    }),
+                    'django.template.loaders.filesystem.Loader',
+                ],
             },
         }],
         DATABASES={'default': {
@@ -1530,7 +1593,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.core.management import call_command
-from django.urls import path
+from django.urls import path, include
 from django.conf.urls.static import static
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1682,6 +1745,45 @@ def analyze(request):
         output_dir      = out_rel,
         status          = 'done',
     )
+
+    # ── Auto-detect new malware and create entries ─────────────────────────
+    try:
+        from malware_views.models import MalwareEntry
+        from malware_views.report_generator import generate_malware_report
+        
+        # Get unique malware from the stats
+        all_malware = set()
+        for item in stats.get('malware_stats', []):
+            malware_name = item.get('label', '')
+            if malware_name:
+                all_malware.add(malware_name)
+        
+        # Also check raw rows for malware not in top 10
+        for row in stats.get('all_rows', []):
+            malware_name = row.get('malware', '')
+            if malware_name:
+                all_malware.add(malware_name)
+        
+        # Create entries for each malware
+        for malware_name in all_malware:
+            if malware_name:
+                entry, created = MalwareEntry.objects.get_or_create(
+                    name=malware_name,
+                    defaults={
+                        'first_seen_run_id': run.pk,
+                        'severity': 'unknown',
+                        'status': 'new'
+                    }
+                )
+                if created:
+                    # Generate intelligence report
+                    generate_malware_report(malware_name, entry, request.user)
+                    log.info(f"Auto-generated malware report for: {malware_name}")
+    except ImportError as e:
+        log.warning(f"Malware module not available: {e}")
+    except Exception as e:
+        log.error(f"Error creating malware entries: {e}")
+
     return redirect('dashboard', run_id=run.pk)
 
 
@@ -1731,6 +1833,7 @@ urlpatterns = [
     path('analyze/',                analyze,           name='analyze'),
     path('dashboard/<int:run_id>/', dashboard,         name='dashboard'),
     path('download/<int:run_id>/',  download_results,  name='download_results'),
+    path('malware/',                include('malware_views.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 
@@ -1744,6 +1847,9 @@ def bootstrap_db():
     call_command('migrate', interactive=False)
 
     from django.db import connection
+    from django.db import models
+    
+    # Create tables for all models
     for model in [KnownMalware, AnalysisRun]:
         table_name = model._meta.db_table
         if table_name not in connection.introspection.table_names():
@@ -1751,6 +1857,20 @@ def bootstrap_db():
             with connection.schema_editor() as editor:
                 editor.create_model(model)
             print(f"[CERT-Bund] Table {table_name} created.")
+
+    # ── Create malware_views tables ──────────────────────────────────────────
+    try:
+        from malware_views.models import MalwareEntry, MalwareReport
+        
+        for model in [MalwareEntry, MalwareReport]:
+            table_name = model._meta.db_table
+            if table_name not in connection.introspection.table_names():
+                print(f"[CERT-Bund] Creating table '{table_name}'…")
+                with connection.schema_editor() as editor:
+                    editor.create_model(model)
+                print(f"[CERT-Bund] Table {table_name} created.")
+    except ImportError as e:
+        print(f"[CERT-Bund] Malware views not available: {e}")
 
     # Populate default malware
     if not KnownMalware.objects.exists():
@@ -1768,7 +1888,6 @@ def bootstrap_db():
             print("[CERT-Bund] Default superuser created: admin / admin123")
     except Exception as exc:
         print(f"[CERT-Bund] Error setting up default user: {exc}")
-
 
 if __name__ == '__main__':
     bootstrap_db()

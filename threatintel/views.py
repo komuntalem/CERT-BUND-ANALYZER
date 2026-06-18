@@ -1,6 +1,10 @@
+import glob
+import os
 from urllib.parse import quote
 
+from django.conf import settings
 from django.contrib import messages
+from django.db import connection
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
@@ -11,18 +15,7 @@ from .models import Advisory, ASN, AnalysisRun
 from .services import AdvisoryService, CSVImportService, DocumentService
 
 
-class DashboardView(View):
-    template_name = "threatintel/dashboard.html"
 
-    def get(self, request):
-        return render(
-            request,
-            self.template_name,
-            {
-                "total_asns": ASN.objects.count(),
-                "total_advisories": Advisory.objects.count(),
-            },
-        )
 
 
 class UploadCSVView(View):
@@ -40,7 +33,7 @@ class UploadCSVView(View):
                 messages.error(
                     request, "No valid rows were found in the uploaded file."
                 )
-                return redirect("threatintel:upload-csv")
+                return redirect("threatintel:generate-advisories")
 
             run = AdvisoryService.process_csv_upload(uploaded_file.name, rows)
 
@@ -52,6 +45,59 @@ class UploadCSVView(View):
             )
             return redirect("threatintel:advisory-list")
         return render(request, self.template_name, {"form": form})
+
+
+def generate_from_run(request, run_id):
+    """Generate advisories from an analysis run's uploaded CSV files.
+
+    Reads CSV files saved by Developer A's analyze view, then processes
+    them through the advisory pipeline to create ASN, Advisory, and
+    EmailDraft records.  No re-upload required.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT output_dir FROM analyzer_analysisrun WHERE id = %s",
+            [run_id],
+        )
+        row = cursor.fetchone()
+
+    if not row or not row[0]:
+        messages.error(request, "Analysis run not found.")
+        return redirect("/")
+
+    # Derive upload directory from output directory
+    # output_dir is like "runs/run_20260618_050000_1/output"
+    # uploads live at   "runs/run_20260618_050000_1/uploads"
+    run_base = os.path.dirname(row[0])
+    upload_dir = os.path.join(settings.MEDIA_ROOT, run_base, "uploads")
+
+    if not os.path.isdir(str(upload_dir)):
+        messages.error(request, "Upload directory not found on disk.")
+        return redirect("/")
+
+    csv_files = sorted(glob.glob(os.path.join(str(upload_dir), "*.csv")))
+    if not csv_files:
+        messages.error(request, "No CSV files found in the analysis run.")
+        return redirect("/")
+
+    total_advisories = 0
+    total_events = 0
+    for csv_path in csv_files:
+        with open(csv_path, "rb") as f:
+            rows = CSVImportService.parse_csv(f)
+            if rows:
+                run = AdvisoryService.process_csv_upload(
+                    os.path.basename(csv_path), rows
+                )
+                total_advisories += run.advisory_count
+                total_events += run.new_event_count
+
+    messages.success(
+        request,
+        f"Advisory generation complete — {total_events} new events, "
+        f"{total_advisories} advisories generated.",
+    )
+    return redirect("threatintel:advisory-list")
 
 
 class ASNListView(ListView):

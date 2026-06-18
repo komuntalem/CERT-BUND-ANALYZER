@@ -25,6 +25,7 @@ import re
 import subprocess
 import urllib.request
 from datetime import date
+from pathlib import Path
 from typing import Iterable
 
 from django.conf import settings
@@ -215,8 +216,15 @@ class SeenCombosService:
     FILENAME = "seen_combos.txt"
 
     @staticmethod
+    def _project_base_dir() -> Path:
+        base_dir = getattr(settings, "BASE_DIR", None)
+        if base_dir:
+            return Path(base_dir)
+        return Path(__file__).resolve().parent.parent
+
+    @staticmethod
     def _filepath() -> str:
-        return os.path.join(settings.BASE_DIR, SeenCombosService.FILENAME)
+        return os.path.join(str(SeenCombosService._project_base_dir()), SeenCombosService.FILENAME)
 
     @staticmethod
     def append_fingerprints(fingerprints: Iterable[str]) -> None:
@@ -516,8 +524,10 @@ class DocumentService:
 
     @staticmethod
     def _media_dir(subdir: str) -> str:
-        media_root = getattr(settings, "MEDIA_ROOT", os.path.join(settings.BASE_DIR, "media"))
-        path = os.path.join(media_root, subdir)
+        media_root = getattr(settings, "MEDIA_ROOT", None)
+        if not media_root:
+            media_root = os.path.join(str(SeenCombosService._project_base_dir()), "media")
+        path = os.path.join(str(media_root), subdir)
         os.makedirs(path, exist_ok=True)
         return path
 

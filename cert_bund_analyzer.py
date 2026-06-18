@@ -1501,6 +1501,9 @@ DASHBOARD_HTML = """{% extends 'analyzer/base.html' %}
       {% else %}
         <span class="btn btn-ghost" style="cursor:default;opacity:0.5;">No results file</span>
       {% endif %}
+      <a href="/intel/generate/{{ run.pk }}/" class="btn btn-ghost">📋 Generate Advisories</a>
+      <a href="/intel/asns/" class="btn btn-ghost">🌐 View ASNs</a>
+      <a href="/intel/advisories/" class="btn btn-ghost">📄 View Advisories</a>
       <a href="/" class="btn btn-ghost">🔬 New Analysis</a>
     </div>
   </div>
@@ -1616,6 +1619,7 @@ from django.conf import settings
 if not settings.configured:
     settings.configure(
         DEBUG=True,
+        BASE_DIR=BASE_DIR,
         SECRET_KEY='django-insecure-g7c6_h)9))3i+538%f!er@74%jn4sg3z%(o%u$5uak=5^*$e4(',
         ALLOWED_HOSTS=['*'],
         INSTALLED_APPS=[
@@ -1624,6 +1628,8 @@ if not settings.configured:
             'django.contrib.contenttypes',
             'django.contrib.sessions',
             'django.contrib.messages',
+            'django.contrib.staticfiles',
+            'threatintel',
             '__main__',
         ],
         MIDDLEWARE=[
@@ -1647,12 +1653,15 @@ if not settings.configured:
                     'django.contrib.auth.context_processors.auth',
                     'django.contrib.messages.context_processors.messages',
                 ],
-                'loaders': [('django.template.loaders.locmem.Loader', {
-                    'analyzer/base.html':      BASE_HTML,
-                    'analyzer/index.html':     INDEX_HTML,
-                    'analyzer/upload.html':    UPLOAD_HTML,
-                    'analyzer/dashboard.html': DASHBOARD_HTML,
-                })],
+                'loaders': [
+                    ('django.template.loaders.locmem.Loader', {
+                        'analyzer/base.html':      BASE_HTML,
+                        'analyzer/index.html':     INDEX_HTML,
+                        'analyzer/upload.html':    UPLOAD_HTML,
+                        'analyzer/dashboard.html': DASHBOARD_HTML,
+                    }),
+                    'django.template.loaders.app_directories.Loader',
+                ],
             },
         }],
         DATABASES={'default': {
@@ -1664,6 +1673,7 @@ if not settings.configured:
         TIME_ZONE='UTC',
         USE_I18N=True,
         USE_TZ=True,
+        STATIC_URL='/static/',
         MEDIA_URL='/media/',
         MEDIA_ROOT=BASE_DIR / 'media',
         DEFAULT_AUTO_FIELD='django.db.models.BigAutoField',
@@ -1671,7 +1681,8 @@ if not settings.configured:
         LOGIN_REDIRECT_URL='/',
     )
 
-django.setup()
+if __name__ == '__main__':
+    django.setup()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Django imports (must come after setup)
@@ -1684,7 +1695,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.core.management import call_command
-from django.urls import path
+from django.urls import include, path
 from django.conf.urls.static import static
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1697,6 +1708,7 @@ class KnownMalware(models.Model):
     
     class Meta:
         db_table = 'analyzer_knownmalware'
+        app_label = 'analyzer'
         
     def __str__(self):
         return self.name
@@ -1709,6 +1721,7 @@ class KnownASN(models.Model):
 
     class Meta:
         db_table = 'analyzer_knownasn'
+        app_label = 'analyzer'
 
     def __str__(self):
         return f"{self.asn_number} - {self.operator_name}"
@@ -1738,6 +1751,7 @@ class AnalysisRun(models.Model):
 
     class Meta:
         db_table = 'analyzer_analysisrun'
+        app_label = 'analyzer'
         ordering = ['-created_at']
 
     def __str__(self):
@@ -1914,6 +1928,7 @@ urlpatterns = [
     path('analyze/',                analyze,           name='analyze'),
     path('dashboard/<int:run_id>/', dashboard,         name='dashboard'),
     path('download/<int:run_id>/',  download_results,  name='download_results'),
+    path('intel/',                   include('threatintel.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 

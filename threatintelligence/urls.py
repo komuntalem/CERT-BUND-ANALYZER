@@ -17,7 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+import cert_bund_analyzer
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('threatintel.urls', namespace='threatintel')),
-]
+] + cert_bund_analyzer.urlpatterns

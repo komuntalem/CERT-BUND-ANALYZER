@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Upload CSV</title>
+    <title>Generate Advisories — CERT-BUND Analyzer</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
 <div class="container py-4">
-    <h1>Upload CSV</h1>
+    <h1>Generate Advisories from CSV</h1>
+    <p class="text-muted">Upload a CERT-Bund CSV file to generate advisories, email drafts, and enable the full advisory workflow.</p>
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }}">{{ message }}</div>
@@ -19,8 +20,8 @@
             {{ form.csv_file.label_tag }}
             {{ form.csv_file }}
         </div>
-        <button class="btn btn-primary" type="submit">Process</button>
-        <a class="btn btn-secondary" href="{% url 'threatintel:dashboard' %}">Back</a>
+        <button class="btn btn-primary" type="submit">Generate Advisories</button>
+        <a class="btn btn-secondary" href="/">Back to Dashboard</a>
     </form>
 </div>
 </body>

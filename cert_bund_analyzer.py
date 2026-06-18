@@ -89,7 +89,7 @@ def run_e2e_test():
 
     # Get admin user
     try:
-        admin = User.objects.get(username='admin')
+        admin = User.objects.get(username='CERT-Bund Admin')
     except User.DoesNotExist:
         admin = User.objects.create_superuser('admin', 'admin@certbund.local', 'admin123')
 

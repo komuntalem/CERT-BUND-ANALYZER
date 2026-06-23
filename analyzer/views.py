@@ -1,3 +1,4 @@
+import glob
 import os
 import json
 import logging
@@ -7,6 +8,7 @@ from datetime import datetime
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+from django.db.models import Max
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -47,7 +49,7 @@ def analyze(request):
     if request.method != 'POST':
         return redirect('index')
 
-    uploaded  = request.FILES.getlist('files')
+    uploaded = request.FILES.getlist('files')
     run_osint = request.POST.get('run_osint') == 'on'
     abuseipdb_key = request.POST.get('abuseipdb_key', '').strip()
 
@@ -62,14 +64,14 @@ def analyze(request):
             'error': 'No CSV files found in the uploaded folder.'
         })
 
-    ts          = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir     = os.path.join(settings.MEDIA_ROOT, 'runs', f'run_{ts}_{request.user.id}')
-    upload_dir  = os.path.join(run_dir, 'uploads')
-    output_dir  = os.path.join(run_dir, 'output')
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(settings.MEDIA_ROOT, 'runs', f'run_{ts}_{request.user.id}')
+    upload_dir = os.path.join(run_dir, 'uploads')
+    output_dir = os.path.join(run_dir, 'output')
     os.makedirs(upload_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    file_pairs  = []
+    file_pairs = []
     folder_name = ''
     for f in csv_files:
         orig_name = f.name
@@ -78,7 +80,7 @@ def analyze(request):
             folder_name = parts[0] if len(parts) > 1 else 'Uploaded Files'
 
         safe_name = os.path.basename(orig_name.replace('\\', '/'))
-        tmp_path  = os.path.join(upload_dir, safe_name)
+        tmp_path = os.path.join(upload_dir, safe_name)
         with open(tmp_path, 'wb') as out:
             for chunk in f.chunks():
                 out.write(chunk)
@@ -87,7 +89,7 @@ def analyze(request):
     try:
         db_malware = set(KnownMalware.objects.values_list('name', flat=True))
         db_asn_map = dict(KnownASN.objects.values_list('asn_number', 'operator_name'))
-        
+
         stats = run_analysis(
             file_pairs, output_dir,
             run_osint=run_osint,
@@ -95,11 +97,11 @@ def analyze(request):
             db_asn_map=db_asn_map,
             abuseipdb_key=abuseipdb_key
         )
-        
+
         # Save newly discovered ASNs
         for asn_num, op_name in stats.get('new_asns', {}).items():
             KnownASN.objects.get_or_create(asn_number=asn_num, defaults={'operator_name': op_name})
-            
+
         # Save newly discovered malware - handle as list
         new_malwares = stats.get('new_malwares', [])
         if isinstance(new_malwares, list):
@@ -108,7 +110,7 @@ def analyze(request):
                     KnownMalware.objects.get_or_create(name=mw)
         else:
             log.warning(f"new_malwares is not a list: {type(new_malwares)}")
-            
+
     except Exception as exc:
         log.exception("Analysis failed: %s", exc)
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -124,19 +126,19 @@ def analyze(request):
         log.warning("new_malwares was not a list, defaulting to empty list")
 
     run = AnalysisRun.objects.create(
-        created_by        = request.user,
-        folder_name       = folder_name,
-        total_rows        = stats['total_rows'],
-        seen_combos_count = stats.get('duplicate_count', 0),
-        unique_asns       = stats['unique_asns'],
-        unique_malwares   = stats['unique_malwares'],
-        unique_ips        = stats['unique_ips'],
-        asn_stats         = stats['asn_stats'],
-        malware_stats     = stats['malware_stats'],
-        ip_stats          = stats['ip_stats'],
-        new_malwares      = new_malwares,
-        output_dir        = out_rel,
-        status            = 'done',
+        created_by=request.user,
+        folder_name=folder_name,
+        total_rows=stats['total_rows'],
+        seen_combos_count=stats.get('duplicate_count', 0),
+        unique_asns=stats['unique_asns'],
+        unique_malwares=stats['unique_malwares'],
+        unique_ips=stats['unique_ips'],
+        asn_stats=stats['asn_stats'],
+        malware_stats=stats['malware_stats'],
+        ip_stats=stats['ip_stats'],
+        new_malwares=new_malwares,
+        output_dir=out_rel,
+        status='done',
     )
 
     # ── Auto-create MalwareEntry records with severity ────────────────────
@@ -184,6 +186,12 @@ def analyze(request):
                         )
                         if created:
                             log.info(f"New malware detected (fallback): {malware_name}")
+                            # Generate report for fallback created entries
+                            try:
+                                generate_malware_report(malware_name, entry, request.user)
+                                log.info(f"Auto-generated malware report for: {malware_name}")
+                            except Exception as report_error:
+                                log.error(f"Error generating report for {malware_name}: {report_error}")
                     except Exception as e2:
                         log.error(f"Error creating entry for {malware_name}: {e2}")
 
@@ -193,17 +201,31 @@ def analyze(request):
                 try:
                     # Check if entry exists and is newly created
                     entry = MalwareEntry.objects.get(name=malware_name)
-                    # Only generate report if entry was just created in this run
+                    # Only generate report if entry was just created in this run or has no report
                     if entry.first_seen_run_id == run.pk or entry.status == 'new':
                         generate_malware_report(malware_name, entry, request.user)
                         log.info(f"Auto-generated malware report for: {malware_name}")
                     else:
                         log.info(f"Malware already exists with report: {malware_name}")
                 except MalwareEntry.DoesNotExist:
-                    log.warning(f"Malware entry not found: {malware_name}")
+                    # If entry doesn't exist, create it
+                    try:
+                        entry, created = MalwareEntry.objects.get_or_create(
+                            name=malware_name,
+                            defaults={
+                                'first_seen_run_id': run.pk,
+                                'severity': 'unknown',
+                                'status': 'new'
+                            }
+                        )
+                        if created:
+                            generate_malware_report(malware_name, entry, request.user)
+                            log.info(f"Auto-generated malware report for: {malware_name}")
+                    except Exception as e:
+                        log.error(f"Error creating entry for {malware_name}: {e}")
                 except Exception as e:
                     log.error(f"Error generating report for {malware_name}: {e}")
-                    
+
     except ImportError as e:
         log.warning(f"Malware module not available: {e}")
     except Exception as e:
@@ -211,21 +233,104 @@ def analyze(request):
 
     return redirect('dashboard', run_id=run.pk)
 
-
 @login_required(login_url='/')
 def dashboard(request, run_id):
     run = get_object_or_404(AnalysisRun, pk=run_id, created_by=request.user)
+
     asn_labels,     asn_values     = run.asn_chart_data()
     malware_labels, malware_values = run.malware_chart_data()
     ip_labels,      ip_values      = run.ip_chart_data()
+
+    # ── ASN legend enrichment ─────────────────────────────────────────────
+    # asn_labels contains whatever asn_chart_data() returns — operator names
+    # (e.g. "CLOUDFLARE") if analysis_engine resolved them, or raw ASN numbers
+    # (e.g. "AS13335") if BGPView was offline. Both cases are handled below.
+    #
+    # Step 1: build reverse map  operator_name → asn_number  from KnownASN.
+    #   KnownASN holds both columns and is populated during analyze().
+    #   This gives us the ASN number needed to query threatintel.Advisory.
+    reverse_map = dict(
+        KnownASN.objects
+        .filter(operator_name__in=asn_labels)
+        .values_list('operator_name', 'asn_number')
+    )
+    # Also build forward map  asn_number → operator_name  for the fallback
+    # case where asn_labels already contains raw ASN numbers (BGPView offline).
+    forward_map = dict(
+        KnownASN.objects
+        .filter(asn_number__in=asn_labels)
+        .values_list('asn_number', 'operator_name')
+    )
+
+    # Step 2: resolve the true ASN numbers we'll use to query Advisory.
+    #   Priority: reverse_map (label is an operator name already in KnownASN)
+    #           → label itself if it starts with 'AS' (e.g. "AS13335")
+    #           → 'AS' + label if it is a bare integer (e.g. "37075")
+    #           → None (no advisory lookup possible)
+    resolved_asn_numbers = []
+    for label in asn_labels:
+        asn_num = (
+            reverse_map.get(label)
+            or (label if label.startswith('AS') else None)
+            or (f'AS{label}' if label.isdigit() else None)
+        )
+        resolved_asn_numbers.append(asn_num)
+
+    # Step 3: latest advisory pk per ASN number — one query, no N+1.
+    from threatintel.models import Advisory as ThreatAdvisory, ASN as ThreatASN
+
+    advisory_pk_map = dict(
+        ThreatAdvisory.objects
+        .filter(asn__asn_number__in=[n for n in resolved_asn_numbers if n])
+        .values('asn__asn_number')
+        .annotate(latest_pk=Max('pk'))
+        .values_list('asn__asn_number', 'latest_pk')
+    )  # {"AS13335": 12, "AS3320": 7}
+
+    # Bulk fetch org names from threatintel.ASN — used when labels are bare
+    # integers (BGPView offline). One query; keyed by 'AS'-prefixed number.
+    ti_asn_org_map = dict(
+        ThreatASN.objects
+        .filter(asn_number__in=[n for n in resolved_asn_numbers if n])
+        .values_list('asn_number', 'organization_name')
+    )
+
+    # Step 4: build legend items and org-label list for the chart tooltips.
+    asn_legend_items = []
+    asn_org_labels   = []
+
+    for label, asn_num in zip(asn_labels, resolved_asn_numbers):
+        # Display name resolution:
+        #   'AS13335'   → forward_map lookup (KnownASN operator_name) or label
+        #   '37075'     → ti_asn_org_map lookup (threatintel.ASN.organization_name)
+        #   'CLOUDFLARE'→ already an operator name, use directly
+        if label.startswith('AS'):
+            org_name = forward_map.get(label) or label
+        elif label.isdigit():
+            org_name = ti_asn_org_map.get(f'AS{label}') or label
+        else:
+            org_name = label  # already an operator name
+
+        advisory_pk  = advisory_pk_map.get(asn_num) if asn_num else None
+        advisory_url = f"/intel/advisories/{advisory_pk}/" if advisory_pk else None
+
+        asn_org_labels.append(org_name)
+        asn_legend_items.append({
+            'org_name':     org_name,
+            'asn':          asn_num or label,
+            'advisory_url': advisory_url,
+        })
+    # ── end ASN legend enrichment ─────────────────────────────────────────
+
     return render(request, 'analyzer/dashboard.html', {
-        'run':            run,
-        'asn_labels':     json.dumps(asn_labels),
-        'asn_values':     json.dumps(asn_values),
-        'malware_labels': json.dumps(malware_labels),
-        'malware_values': json.dumps(malware_values),
-        'ip_labels':      json.dumps(ip_labels),
-        'ip_values':      json.dumps(ip_values),
+        'run':              run,
+        'asn_labels':       json.dumps(asn_org_labels),   # org names for chart tooltips
+        'asn_values':       json.dumps(asn_values),       # counts unchanged
+        'asn_legend_items': asn_legend_items,             # server-rendered legend
+        'malware_labels':   json.dumps(malware_labels),
+        'malware_values':   json.dumps(malware_values),
+        'ip_labels':        json.dumps(ip_labels),
+        'ip_values':        json.dumps(ip_values),
     })
 
 
@@ -234,27 +339,14 @@ def download_results(request, run_id):
     run = get_object_or_404(AnalysisRun, pk=run_id, created_by=request.user)
     if not run.output_dir:
         return HttpResponse('No output directory found.', status=404)
-    
+
     abs_out_dir = os.path.join(settings.MEDIA_ROOT, run.output_dir)
     if not os.path.exists(abs_out_dir):
         return HttpResponse('Output directory not found on disk.', status=404)
-        
+
     zip_path = create_results_zip(abs_out_dir)
-    
+
     with open(zip_path, 'rb') as f:
         response = HttpResponse(f.read(), content_type='application/zip')
         response['Content-Disposition'] = f'attachment; filename="results_run_{run_id}.zip"'
         return response
-
-
-# ── API endpoint for getting the most recent run ──────────────────────────────
-def get_recent_run(request):
-    """
-    Get the most recent analysis run for the current user.
-    Used by the malware list page to navigate back to the dashboard.
-    """
-    if request.user.is_authenticated:
-        run = AnalysisRun.objects.filter(created_by=request.user).order_by('-created_at').first()
-        if run:
-            return JsonResponse({'run_id': run.pk})
-    return JsonResponse({'run_id': None})

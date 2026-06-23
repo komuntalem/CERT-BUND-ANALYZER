@@ -39,6 +39,15 @@ from .models import ASN, Advisory, AnalysisRun, AttackEvent, EmailDraft, Malware
 
 log = logging.getLogger(__name__)
 
+# Circuit breaker: set to True after the first nslookup failure so all
+# subsequent ASNs in the same process skip the 15-second timeout entirely.
+_cymru_unavailable: bool = False
+# Empty-result streak counter: trip the circuit breaker after this many
+# consecutive lookups that return no TXT record (nslookup ran fine but
+# Cymru returned nothing — not a timeout, not a FileNotFoundError).
+_cymru_empty_streak: int = 0
+_CYMRU_EMPTY_STREAK_LIMIT: int = 3
+
 
 # ---------------------------------------------------------------------------
 # ASN ENRICHMENT
@@ -57,11 +66,21 @@ class ASNLookupService:
 
     @staticmethod
     def _extract_asn_number(asn_string: str) -> str:
-        """Extract the numeric part from an ASN string like 'AS13335' or '13335'."""
+        """Extract only the numeric part from an ASN string.
+
+        Handles both bare numbers and strings with a trailing org name:
+            'AS13335'              → '13335'
+            'AS13335 CLOUDFLARE'  → '13335'   (org name discarded)
+            '13335'               → '13335'
+            '13335 CLOUDFLARE'    → '13335'
+        """
         cleaned = asn_string.strip().upper()
         if cleaned.startswith("AS"):
-            return cleaned[2:]
-        return cleaned
+            cleaned = cleaned[2:]
+        # Take only the leading digit sequence — discard anything after the
+        # first space or non-digit character (e.g. " CLOUDFLARE").
+        m = re.match(r'(\d+)', cleaned)
+        return m.group(1) if m else cleaned
 
     @staticmethod
     def _normalize_asn(asn_string: str) -> str:
@@ -77,7 +96,15 @@ class ASNLookupService:
 
         TXT format: "13335 | US | arin | 2010-07-14 | CLOUDFLARENET, US"
         Returns (organization_name, country_code).
+
+        A module-level circuit breaker (_cymru_unavailable) is tripped on the
+        first FileNotFoundError or TimeoutExpired so that subsequent ASNs in
+        the same process return immediately instead of each blocking 15 s.
         """
+        global _cymru_unavailable, _cymru_empty_streak
+        if _cymru_unavailable:
+            return "", ""
+
         try:
             result = subprocess.run(
                 ["nslookup", "-type=TXT", f"AS{asn_num}.asn.cymru.com"],
@@ -94,11 +121,26 @@ class ASNLookupService:
                         country = parts[1]
                         org_name = parts[4]
                         # Team Cymru often appends ", CC" to org name — keep as-is
+                        # Successful result — reset the empty-streak counter.
+                        _cymru_empty_streak = 0
                         return org_name, country
+            # nslookup ran but returned no usable TXT record — count the miss.
+            _cymru_empty_streak += 1
+            if _cymru_empty_streak >= _CYMRU_EMPTY_STREAK_LIMIT:
+                _cymru_unavailable = True
+                log.warning(
+                    "Team Cymru returned empty results %d times consecutively — "
+                    "disabling for this session.", _CYMRU_EMPTY_STREAK_LIMIT
+                )
         except FileNotFoundError:
+            _cymru_unavailable = True
             log.debug("nslookup not found — skipping Team Cymru DNS lookup.")
         except subprocess.TimeoutExpired:
-            log.warning("Team Cymru DNS lookup timed out for AS%s.", asn_num)
+            _cymru_unavailable = True
+            log.warning(
+                "Team Cymru DNS lookup timed out for AS%s — disabling for this session.",
+                asn_num,
+            )
         except Exception as exc:
             log.debug("Team Cymru lookup failed for AS%s: %s", asn_num, exc)
         return "", ""
@@ -162,21 +204,23 @@ class ASNLookupService:
         )
 
         # Enrich if organization name is still blank
+        update_fields = []
         if not asn.organization_name:
             org, country = ASNLookupService.resolve_organization(normalized)
-            update_fields = []
             if org:
                 asn.organization_name = org
                 update_fields.append("organization_name")
             if country:
                 asn.country = country
                 update_fields.append("country")
-            if update_fields:
-                asn.save(update_fields=update_fields)
 
-        # Always update last_seen
-        asn.last_seen = timezone.now()
-        asn.save(update_fields=["last_seen"])
+        # Only write last_seen when the record was just created or when we
+        # are already saving enrichment fields — avoids a redundant write-lock
+        # acquisition on every call for already-known ASNs.
+        if created or update_fields:
+            asn.last_seen = timezone.now()
+            update_fields.append("last_seen")
+            asn.save(update_fields=update_fields)
 
         return asn
 
@@ -350,16 +394,12 @@ class AdvisoryService:
 
     @staticmethod
     def build_email_body(advisory: Advisory) -> str:
-        """Build a structured email body for an advisory notification."""
+        """Build a simple notification email body — details are in the attached advisory."""
+        title = advisory.advisory_number or advisory.asn.get_display_name()
         return (
-            f"Advisory Number: {advisory.advisory_number}\n"
-            f"Date: {advisory.advisory_date}\n"
-            f"Organization Name: {advisory.asn.get_display_name()}\n"
-            f"ASN: {advisory.asn.asn_number}\n"
-            f"Malware Detected: {advisory.malware.malware_name}\n"
-            f"Risk Level: {advisory.malware.risk_level}\n\n"
-            f"Summary:\n{advisory.summary}\n\n"
-            f"Recommended Mitigation Actions:\n{advisory.recommended_mitigation}\n"
+            f"Hello,\n\n"
+            f"find attached an advisory about {title}.\n\n"
+            f"Regards,"
         )
 
     @staticmethod
@@ -397,6 +437,17 @@ class AdvisoryService:
             # -- Phase 2: Collect all fingerprints for audit log -------------
             all_fingerprints = [row["fingerprint"] for row in rows]
 
+            # -- Phase 3: Bulk-prefetch existing fingerprints for dedup ------
+            # One SELECT outside the transaction — loads only the fingerprints
+            # present in this batch. The write-lock is then held only for the
+            # INSERT statements, not for per-row existence checks.
+            batch_fingerprints = {row["fingerprint"] for row in rows}
+            existing_fingerprints = set(
+                AttackEvent.objects
+                .filter(fingerprint__in=batch_fingerprints)
+                .values_list('fingerprint', flat=True)
+            )
+
             # -- Phase 3: Process events in transaction ----------------------
             new_events_by_pair: dict[tuple, dict] = {}
             new_event_count = 0
@@ -405,8 +456,7 @@ class AdvisoryService:
                 for row in rows:
                     fp = row["fingerprint"]
 
-                    # Dedup against AttackEvent table
-                    if AttackEvent.objects.filter(fingerprint=fp).exists():
+                    if fp in existing_fingerprints:   # Python set — no DB query
                         continue
 
                     asn = asn_cache.get(row["asn"]) or ASNLookupService.ensure_asn(
@@ -533,21 +583,50 @@ class DocumentService:
 
     @staticmethod
     def generate_advisory_docx(advisory: Advisory) -> str:
-        """Generate a professionally formatted advisory DOCX document."""
+        """Generate a professionally formatted advisory DOCX document.
+
+        Formatting: Bookman Old Style, 12pt, 1.5 line spacing, justified, black/white.
+        """
+        from docx.shared import RGBColor
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+
+        FONT_NAME = "Bookman Old Style"
+        FONT_SIZE = Pt(12)
+        LINE_SPACING = Pt(18)  # 1.5 × 12pt
+
+        def _fmt(paragraph, bold=False, center=False):
+            """Apply standard formatting to every run in a paragraph."""
+            paragraph.paragraph_format.line_spacing = LINE_SPACING
+            if center:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            else:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            for run in paragraph.runs:
+                run.font.name = FONT_NAME
+                run.font.size = FONT_SIZE
+                run.font.color.rgb = RGBColor(0, 0, 0)
+                if bold:
+                    run.bold = True
+
+        def _add_paragraph(doc, text, bold=False, center=False):
+            p = doc.add_paragraph(text)
+            _fmt(p, bold=bold, center=center)
+            return p
+
         doc = Document()
 
         # -- Title --
-        title = doc.add_heading("Cybersecurity Advisory", level=0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_p = _add_paragraph(doc, "Cybersecurity Advisory", bold=True, center=True)
 
-        subtitle = doc.add_heading(
-            advisory.advisory_number or "Draft Advisory", level=1
+        # -- Advisory number subtitle --
+        sub_p = _add_paragraph(
+            doc, advisory.advisory_number or "Draft Advisory", bold=True, center=True
         )
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_paragraph("")  # spacer
 
-        # -- Metadata table --
+        # -- Metadata table (black/white: no shading, single-line borders) --
         table = doc.add_table(rows=6, cols=2)
         table.style = "Table Grid"
 
@@ -561,26 +640,39 @@ class DocumentService:
         ]
         for i, (label, value) in enumerate(metadata):
             row = table.rows[i]
-            row.cells[0].text = label
-            row.cells[1].text = value
-            # Bold the label column
-            for paragraph in row.cells[0].paragraphs:
-                for run in paragraph.runs:
-                    run.bold = True
+            for cell, text, bold in (
+                (row.cells[0], label, True),
+                (row.cells[1], value, False),
+            ):
+                cell.text = text
+                for para in cell.paragraphs:
+                    para.paragraph_format.line_spacing = LINE_SPACING
+                    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                    for run in para.runs:
+                        run.font.name = FONT_NAME
+                        run.font.size = FONT_SIZE
+                        run.font.color.rgb = RGBColor(0, 0, 0)
+                        run.bold = bold
 
         doc.add_paragraph("")  # spacer
 
-        # -- Summary --
-        doc.add_heading("Summary", level=1)
-        doc.add_paragraph(advisory.summary or advisory.content or "No summary available.")
+        # -- Summary heading --
+        _add_paragraph(doc, "Summary", bold=True)
 
-        # -- Recommended Mitigation --
-        doc.add_heading("Recommended Mitigation", level=1)
+        # -- Summary body --
+        _add_paragraph(
+            doc, advisory.summary or advisory.content or "No summary available."
+        )
+
+        # -- Recommended Mitigation heading --
+        _add_paragraph(doc, "Recommended Mitigation", bold=True)
+
+        # -- Mitigation lines --
         mitigation = advisory.recommended_mitigation or "No specific mitigation provided."
         for line in mitigation.split("\n"):
             line = line.strip()
             if line:
-                doc.add_paragraph(line, style="List Bullet")
+                _add_paragraph(doc, line)
 
         # -- Save --
         outdir = DocumentService._media_dir("advisories")

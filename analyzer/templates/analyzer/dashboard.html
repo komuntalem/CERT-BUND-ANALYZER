@@ -73,7 +73,25 @@
             <div class="chart-center-text">ASNs</div>
           </div>
         </div>
-        <div class="chart-legend" id="asn-legend" aria-label="ASN legend"></div>
+
+        {# ── Server-rendered ASN legend — clickable org names, no JS override ── #}
+        <div class="chart-legend" id="asn-legend" aria-label="ASN legend">
+          {% for item in asn_legend_items %}
+          <div class="legend-item">
+            <span class="legend-dot" id="asn-dot-{{ forloop.counter0 }}"></span>
+            {% if item.advisory_url %}
+              <a href="{{ item.advisory_url }}"
+                 class="legend-label legend-asn-link"
+                 title="ASN: {{ item.asn }}">{{ item.org_name }}</a>
+            {% else %}
+              <span class="legend-label" title="ASN: {{ item.asn }}">{{ item.org_name }}</span>
+            {% endif %}
+          </div>
+          {% empty %}
+          <p style="font-size:0.8rem;color:#64748b;padding:0.5rem 0;">No ASN data</p>
+          {% endfor %}
+        </div>
+
       {% else %}
         <div class="no-data-state"><div class="icon" aria-hidden="true"></div><p>No ASN data available</p></div>
       {% endif %}
@@ -146,6 +164,19 @@
   </div>
 
 </div>
+
+<style>
+.legend-asn-link {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.legend-asn-link:hover {
+  color: #10d97a;
+  text-decoration: underline;
+}
+</style>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -237,7 +268,17 @@
     animateCounter(document.getElementById('stat-malwares'),     parseInt("{{ run.unique_malwares }}")   || 0);
     animateCounter(document.getElementById('stat-ips'),          parseInt("{{ run.unique_ips }}")        || 0);
 
-    if (asnLabels.length)     { buildDoughnut('asn-chart',     asnLabels,     asnValues,     'emerald'); buildLegend('asn-legend',     asnLabels,     asnValues,     'emerald'); }
+    // ASN: build chart only — legend is server-rendered, dots synced below
+    if (asnLabels.length) {
+      buildDoughnut('asn-chart', asnLabels, asnValues, 'emerald');
+      // Sync server-rendered legend dot colours to match chart slice palette
+      PALETTES.emerald.forEach(function(color, i) {
+        var dot = document.getElementById('asn-dot-' + i);
+        if (dot) dot.style.background = color;
+      });
+    }
+
+    // Malware and IP legends remain JS-rendered — unchanged
     if (malwareLabels.length) { buildDoughnut('malware-chart', malwareLabels, malwareValues, 'violet');  buildLegend('malware-legend', malwareLabels, malwareValues, 'violet');  }
     if (ipLabels.length)      { buildDoughnut('ip-chart',      ipLabels,      ipValues,      'rose');    buildLegend('ip-legend',      ipLabels,      ipValues,      'rose');    }
   });

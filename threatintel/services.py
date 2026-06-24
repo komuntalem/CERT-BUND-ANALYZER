@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import urllib.request
+import concurrent.futures
 from datetime import date
 from pathlib import Path
 from typing import Iterable
@@ -92,39 +93,36 @@ class ASNLookupService:
 
     @staticmethod
     def _lookup_cymru(asn_num: str) -> tuple[str, str]:
-        """Query Team Cymru WHOIS via nslookup TXT record.
+        """Query Team Cymru WHOIS via dnspython TXT record.
 
         TXT format: "13335 | US | arin | 2010-07-14 | CLOUDFLARENET, US"
         Returns (organization_name, country_code).
 
         A module-level circuit breaker (_cymru_unavailable) is tripped on the
-        first FileNotFoundError or TimeoutExpired so that subsequent ASNs in
-        the same process return immediately instead of each blocking 15 s.
+        first Timeout so that subsequent ASNs in the same process return immediately.
         """
         global _cymru_unavailable, _cymru_empty_streak
         if _cymru_unavailable:
             return "", ""
 
         try:
-            result = subprocess.run(
-                ["nslookup", "-type=TXT", f"AS{asn_num}.asn.cymru.com"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            for line in result.stdout.split("\n"):
-                match = re.search(r'"([^"]+)"', line)
-                if match:
-                    txt = match.group(1)
-                    parts = [p.strip() for p in txt.split("|")]
-                    if len(parts) >= 5:
-                        country = parts[1]
-                        org_name = parts[4]
-                        # Team Cymru often appends ", CC" to org name — keep as-is
-                        # Successful result — reset the empty-streak counter.
-                        _cymru_empty_streak = 0
-                        return org_name, country
-            # nslookup ran but returned no usable TXT record — count the miss.
+            import dns.resolver
+            import dns.exception
+            
+            # Using dnspython
+            answers = dns.resolver.resolve(f"AS{asn_num}.asn.cymru.com", "TXT", lifetime=10)
+            for rdata in answers:
+                # Extract text from TXT record
+                txt = b"".join(rdata.strings).decode("utf-8")
+                parts = [p.strip() for p in txt.split("|")]
+                if len(parts) >= 5:
+                    country = parts[1]
+                    org_name = parts[4]
+                    # Successful result — reset the empty-streak counter.
+                    _cymru_empty_streak = 0
+                    return org_name, country
+                    
+            # Ran but returned no usable TXT record — count the miss.
             _cymru_empty_streak += 1
             if _cymru_empty_streak >= _CYMRU_EMPTY_STREAK_LIMIT:
                 _cymru_unavailable = True
@@ -132,10 +130,15 @@ class ASNLookupService:
                     "Team Cymru returned empty results %d times consecutively — "
                     "disabling for this session.", _CYMRU_EMPTY_STREAK_LIMIT
                 )
-        except FileNotFoundError:
+        except ImportError:
+            log.error("dnspython not installed. Cannot perform Team Cymru lookup.")
             _cymru_unavailable = True
-            log.debug("nslookup not found — skipping Team Cymru DNS lookup.")
-        except subprocess.TimeoutExpired:
+        except dns.resolver.NXDOMAIN:
+            _cymru_empty_streak += 1
+            if _cymru_empty_streak >= _CYMRU_EMPTY_STREAK_LIMIT:
+                _cymru_unavailable = True
+                log.warning("Team Cymru returned NXDOMAIN multiple times — disabling.")
+        except dns.exception.Timeout:
             _cymru_unavailable = True
             log.warning(
                 "Team Cymru DNS lookup timed out for AS%s — disabling for this session.",
@@ -428,19 +431,54 @@ class AdvisoryService:
         )
 
         try:
-            # -- Phase 1: Pre-enrich ASNs (HTTP — outside transaction) ------
+            # -- Phase 1: Pre-enrich ASNs & Malware (HTTP/DB — outside transaction) ------
             unique_asn_numbers = {row["asn"] for row in rows}
             asn_cache: dict[str, ASN] = {}
+            
+            # Step 1A: Fetch from DB / Create empty placeholders
             for asn_num in unique_asn_numbers:
-                asn_cache[asn_num] = ASNLookupService.ensure_asn(asn_num)
+                normalized = ASNLookupService._normalize_asn(asn_num)
+                asn, _ = ASN.objects.get_or_create(asn_number=normalized, defaults={"organization_name": ""})
+                asn_cache[asn_num] = asn
+                
+            # Step 1B: Find ASNs that still need org name enrichment
+            asns_to_enrich = {asn_num: asn_cache[asn_num] for asn_num in unique_asn_numbers if not asn_cache[asn_num].organization_name}
+            
+            if asns_to_enrich:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                    future_to_asn = {
+                        executor.submit(ASNLookupService.resolve_organization, asn_num): asn_num
+                        for asn_num in asns_to_enrich
+                    }
+                    for future in concurrent.futures.as_completed(future_to_asn):
+                        asn_num = future_to_asn[future]
+                        try:
+                            org, country = future.result()
+                            if org or country:
+                                asn = asn_cache[asn_num]
+                                if org: asn.organization_name = org
+                                if country: asn.country = country
+                                asn.last_seen = timezone.now()
+                                asn.save(update_fields=["organization_name", "country", "last_seen"])
+                        except Exception as exc:
+                            log.error("Concurrent ASN lookup failed for %s: %s", asn_num, exc)
+            
+            # Update last_seen for all ASNs found in this batch (that didn't just get updated)
+            ASN.objects.filter(id__in=[asn.id for asn in asn_cache.values()]).update(last_seen=timezone.now())
 
-            # -- Phase 2: Collect all fingerprints for audit log -------------
-            all_fingerprints = [row["fingerprint"] for row in rows]
+            unique_malware_names = {row["malware"] for row in rows if row.get("malware")}
+            existing_malwares = {m.malware_name: m for m in Malware.objects.filter(malware_name__in=unique_malware_names)}
+            new_malwares_to_create = []
+            for m_name in unique_malware_names:
+                if m_name not in existing_malwares:
+                    new_malwares_to_create.append(Malware(malware_name=m_name, description="", risk_level="Medium"))
+            if new_malwares_to_create:
+                Malware.objects.bulk_create(new_malwares_to_create)
+                # Ensure the cache is updated with the newly created IDs
+                existing_malwares.update({m.malware_name: m for m in Malware.objects.filter(malware_name__in=[m.malware_name for m in new_malwares_to_create])})
+            malware_cache = existing_malwares
 
-            # -- Phase 3: Bulk-prefetch existing fingerprints for dedup ------
-            # One SELECT outside the transaction — loads only the fingerprints
-            # present in this batch. The write-lock is then held only for the
-            # INSERT statements, not for per-row existence checks.
+            # -- Phase 2: Bulk-prefetch existing fingerprints for dedup ------
             batch_fingerprints = {row["fingerprint"] for row in rows}
             existing_fingerprints = set(
                 AttackEvent.objects
@@ -448,95 +486,124 @@ class AdvisoryService:
                 .values_list('fingerprint', flat=True)
             )
 
-            # -- Phase 3: Process events in transaction ----------------------
+            # -- Phase 3: Prepare events ----------------------
             new_events_by_pair: dict[tuple, dict] = {}
-            new_event_count = 0
+            new_attack_events = []
+            new_fingerprints_for_audit = []
+
+            for row in rows:
+                fp = row["fingerprint"]
+
+                if fp in existing_fingerprints:   # Python set — no DB query
+                    continue
+
+                asn = asn_cache.get(row["asn"]) or ASNLookupService.ensure_asn(row["asn"])
+                malware = malware_cache.get(row["malware"]) or MalwareService.ensure_malware(row["malware"])
+
+                new_attack_events.append(AttackEvent(
+                    analysis_run=run,
+                    asn=asn,
+                    malware=malware,
+                    fingerprint=fp,
+                    ip=row.get("ip", ""),
+                    dst_ip=row.get("dst_ip", ""),
+                    dst_port=row.get("dst_port", ""),
+                    src_port=row.get("src_port", ""),
+                    event_timestamp=row.get("timestamp", ""),
+                    dst_host=row.get("dst_host", ""),
+                    proto=row.get("proto", ""),
+                ))
+                new_fingerprints_for_audit.append(fp)
+
+                # Group by (ASN, Malware) for advisory generation
+                pair_key = (asn.pk, malware.pk)
+                if pair_key not in new_events_by_pair:
+                    new_events_by_pair[pair_key] = {
+                        "asn": asn,
+                        "malware": malware,
+                        "count": 0,
+                    }
+                new_events_by_pair[pair_key]["count"] += 1
+
+            new_event_count = len(new_attack_events)
 
             with transaction.atomic():
-                for row in rows:
-                    fp = row["fingerprint"]
+                if new_attack_events:
+                    AttackEvent.objects.bulk_create(new_attack_events, batch_size=1000)
 
-                    if fp in existing_fingerprints:   # Python set — no DB query
-                        continue
-
-                    asn = asn_cache.get(row["asn"]) or ASNLookupService.ensure_asn(
-                        row["asn"]
-                    )
-                    malware = MalwareService.ensure_malware(row["malware"])
-
-                    AttackEvent.objects.create(
-                        analysis_run=run,
-                        asn=asn,
-                        malware=malware,
-                        fingerprint=fp,
-                        ip=row.get("ip", ""),
-                        dst_ip=row.get("dst_ip", ""),
-                        dst_port=row.get("dst_port", ""),
-                        src_port=row.get("src_port", ""),
-                        event_timestamp=row.get("timestamp", ""),
-                        dst_host=row.get("dst_host", ""),
-                        proto=row.get("proto", ""),
-                    )
-                    new_event_count += 1
-
-                    # Group by (ASN, Malware) for advisory generation
-                    pair_key = (asn.pk, malware.pk)
-                    if pair_key not in new_events_by_pair:
-                        new_events_by_pair[pair_key] = {
-                            "asn": asn,
-                            "malware": malware,
-                            "count": 0,
-                        }
-                    new_events_by_pair[pair_key]["count"] += 1
-
-            # -- Phase 4: Audit log (always, independent of dedup) ----------
-            SeenCombosService.append_fingerprints(all_fingerprints)
+            # -- Phase 4: Audit log (Only append new combos) ----------------
+            if new_fingerprints_for_audit:
+                SeenCombosService.append_fingerprints(new_fingerprints_for_audit)
 
             # -- Phase 5+6: Generate advisories + email drafts ---------------
             advisory_count = 0
+            new_advisories = []
+            
+            # Fetch the base sequence number once so bulk creation doesn't duplicate them
+            base_advisory_number = AdvisoryService._next_advisory_number()
+            prefix_parts = base_advisory_number.split("-")
+            if len(prefix_parts) >= 3:
+                prefix = f"{prefix_parts[0]}-{prefix_parts[1]}-"
+                try:
+                    current_seq = int(prefix_parts[2])
+                except ValueError:
+                    current_seq = 1
+            else:
+                prefix = f"ADV-{date.today().year}-"
+                current_seq = 1
+            
+            for pair_data in new_events_by_pair.values():
+                asn = pair_data["asn"]
+                malware = pair_data["malware"]
+                event_count = pair_data["count"]
+
+                advisory_number = f"{prefix}{current_seq:04d}"
+                current_seq += 1
+
+                summary = (
+                    f"Detected {event_count} unique attack event(s) involving "
+                    f"malware '{malware.malware_name}' targeting network assets "
+                    f"associated with {asn.get_display_name()} ({asn.asn_number})."
+                )
+                mitigation = (
+                    "1. Isolate affected systems immediately.\n"
+                    "2. Block all identified malicious IP addresses and domains.\n"
+                    "3. Update antivirus signatures and scan all endpoints.\n"
+                    "4. Review firewall and IDS/IPS rules.\n"
+                    "5. Escalate to security operations for further investigation.\n"
+                    "6. Preserve forensic evidence for incident response."
+                )
+
+                new_advisories.append(Advisory(
+                    advisory_number=advisory_number,
+                    advisory_date=date.today(),
+                    asn=asn,
+                    malware=malware,
+                    summary=summary,
+                    recommended_mitigation=mitigation,
+                    content=f"{summary}\n\n{mitigation}",
+                    status="draft",
+                    source_run=run,
+                ))
+
             with transaction.atomic():
-                for pair_data in new_events_by_pair.values():
-                    asn = pair_data["asn"]
-                    malware = pair_data["malware"]
-                    event_count = pair_data["count"]
-
-                    advisory_number = AdvisoryService._next_advisory_number()
-
-                    summary = (
-                        f"Detected {event_count} unique attack event(s) involving "
-                        f"malware '{malware.malware_name}' targeting network assets "
-                        f"associated with {asn.get_display_name()} ({asn.asn_number})."
-                    )
-                    mitigation = (
-                        "1. Isolate affected systems immediately.\n"
-                        "2. Block all identified malicious IP addresses and domains.\n"
-                        "3. Update antivirus signatures and scan all endpoints.\n"
-                        "4. Review firewall and IDS/IPS rules.\n"
-                        "5. Escalate to security operations for further investigation.\n"
-                        "6. Preserve forensic evidence for incident response."
-                    )
-
-                    advisory = Advisory.objects.create(
-                        advisory_number=advisory_number,
-                        advisory_date=date.today(),
-                        asn=asn,
-                        malware=malware,
-                        summary=summary,
-                        recommended_mitigation=mitigation,
-                        content=f"{summary}\n\n{mitigation}",
-                        status="draft",
-                        source_run=run,
-                    )
-
-                    EmailDraft.objects.create(
-                        advisory=advisory,
-                        subject=(
-                            f"Cybersecurity Advisory Notification – "
-                            f"{asn.get_display_name()}"
-                        ),
-                        body=AdvisoryService.build_email_body(advisory),
-                    )
-                    advisory_count += 1
+                if new_advisories:
+                    created_advisories = Advisory.objects.bulk_create(new_advisories)
+                    advisory_count = len(created_advisories)
+                    
+                    new_emails = []
+                    for advisory in created_advisories:
+                        new_emails.append(EmailDraft(
+                            advisory=advisory,
+                            subject=(
+                                f"Cybersecurity Advisory Notification – "
+                                f"{advisory.asn.get_display_name()}"
+                            ),
+                            body=AdvisoryService.build_email_body(advisory),
+                        ))
+                    
+                    if new_emails:
+                        EmailDraft.objects.bulk_create(new_emails)
 
             # -- Phase 7: Finalize run --------------------------------------
             run.new_event_count = new_event_count
@@ -616,63 +683,89 @@ class DocumentService:
 
         doc = Document()
 
-        # -- Title --
-        title_p = _add_paragraph(doc, "Cybersecurity Advisory", bold=True, center=True)
-
-        # -- Advisory number subtitle --
-        sub_p = _add_paragraph(
-            doc, advisory.advisory_number or "Draft Advisory", bold=True, center=True
-        )
-
+        # -- Greeting --
+        org_name = advisory.asn.get_display_name() or "Team"
+        _add_paragraph(doc, f"Dear {org_name},")
+        
+        # -- Metadata --
+        _add_paragraph(doc, f"Advisory Number: {advisory.advisory_number or 'TBD'}")
+        
+        # Format date as something like "11th June 2026"
+        def ordinal(n):
+            if 11 <= (n % 100) <= 13:
+                return str(n) + 'th'
+            return str(n) + {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+            
+        advisory_date = advisory.advisory_date
+        formatted_date = f"{ordinal(advisory_date.day)} {advisory_date.strftime('%B %Y')}"
+        
+        _add_paragraph(doc, f"Date of Issuance: {formatted_date}")
+        _add_paragraph(doc, "Identified Asset: List of Identified IP addresses attached.")
+        
         doc.add_paragraph("")  # spacer
 
-        # -- Metadata table (black/white: no shading, single-line borders) --
-        table = doc.add_table(rows=6, cols=2)
+        # -- Intro text --
+        intro = (
+            "Please find attached details of IP addresses within your network that are associated with hosts "
+            "most likely compromised by malware. These IP addresses should be treated as indicators of "
+            "potentially affected systems and require immediate investigation, containment, and remediation."
+        )
+        _add_paragraph(doc, intro)
+
+        doc.add_paragraph("")  # spacer
+        
+        _add_paragraph(doc, "Description of the Identified Malware.")
+        
+        # -- Malware table --
+        table = doc.add_table(rows=2, cols=4)
         table.style = "Table Grid"
-
-        metadata = [
-            ("Advisory Number", advisory.advisory_number or "TBD"),
-            ("Date", str(advisory.advisory_date)),
-            ("Organization", advisory.asn.get_display_name()),
-            ("ASN", advisory.asn.asn_number),
-            ("Malware", advisory.malware.malware_name),
-            ("Risk Level", advisory.malware.risk_level),
+        
+        # Header row
+        headers = ["MALWARE", "DESCRIPTION", "RISK", "IMPACT"]
+        for i, header in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.text = header
+            _fmt(cell.paragraphs[0], bold=True)
+            
+        # Data row
+        data = [
+            advisory.malware.malware_name,
+            advisory.summary or advisory.content or "No description available.",
+            advisory.malware.risk_level,
+            "High" if advisory.malware.risk_level in ("High", "Critical") else advisory.malware.risk_level
         ]
-        for i, (label, value) in enumerate(metadata):
-            row = table.rows[i]
-            for cell, text, bold in (
-                (row.cells[0], label, True),
-                (row.cells[1], value, False),
-            ):
-                cell.text = text
-                for para in cell.paragraphs:
-                    para.paragraph_format.line_spacing = LINE_SPACING
-                    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                    for run in para.runs:
-                        run.font.name = FONT_NAME
-                        run.font.size = FONT_SIZE
-                        run.font.color.rgb = RGBColor(0, 0, 0)
-                        run.bold = bold
-
+        
+        for i, val in enumerate(data):
+            cell = table.rows[1].cells[i]
+            cell.text = str(val)
+            _fmt(cell.paragraphs[0])
+            
         doc.add_paragraph("")  # spacer
 
-        # -- Summary heading --
-        _add_paragraph(doc, "Summary", bold=True)
-
-        # -- Summary body --
-        _add_paragraph(
-            doc, advisory.summary or advisory.content or "No summary available."
-        )
-
-        # -- Recommended Mitigation heading --
-        _add_paragraph(doc, "Recommended Mitigation", bold=True)
-
-        # -- Mitigation lines --
+        # -- Recommended Actions --
+        _add_paragraph(doc, "Recommended Actions:")
+        
         mitigation = advisory.recommended_mitigation or "No specific mitigation provided."
         for line in mitigation.split("\n"):
             line = line.strip()
             if line:
+                # remove any leading numbers since the source might have them, or keep them.
+                # Assuming the mitigation field contains the numbered items.
                 _add_paragraph(doc, line)
+                
+        doc.add_paragraph("")  # spacer
+        
+        # -- Conclusion --
+        conclusion = (
+            "You are required to submit an initial status update within 48 hours from receipt of this "
+            "advisory via the feedback form below."
+        )
+        _add_paragraph(doc, conclusion)
+        
+        _add_paragraph(doc, "UCC-CERT CYBERSECURITY ADVISORY FEEDBACK FORM  – Fill out form")
+        
+        doc.add_paragraph("")  # spacer
+        _add_paragraph(doc, "Kind regards,")
 
         # -- Save --
         outdir = DocumentService._media_dir("advisories")

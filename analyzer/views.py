@@ -17,6 +17,7 @@ from .analysis_engine import run_analysis, create_results_zip
 
 log = logging.getLogger("cert_bund_web")
 
+
 def index(request):
     # Always show the login page for unauthenticated users.
     # SESSION_EXPIRE_AT_BROWSER_CLOSE=True ensures the session cookie
@@ -102,6 +103,22 @@ def analyze(request):
         for asn_num, op_name in stats.get('new_asns', {}).items():
             KnownASN.objects.get_or_create(asn_number=asn_num, defaults={'operator_name': op_name})
 
+        # Pre-seed threatintel.ASN so the advisory pipeline finds records
+        # already populated and skips external lookups (Team Cymru / PeeringDB).
+        # Uses the same already-resolved data — no additional network calls.
+        try:
+            from threatintel.models import ASN as ThreatASN
+            for asn_num, op_name in stats.get('new_asns', {}).items():
+                obj, created = ThreatASN.objects.get_or_create(
+                    asn_number=asn_num,
+                    defaults={'organization_name': op_name},
+                )
+                if not created and not obj.organization_name and op_name:
+                    obj.organization_name = op_name
+                    obj.save(update_fields=['organization_name'])
+        except Exception as e:
+            log.warning("Could not pre-seed threatintel ASN table: %s", e)
+
         # Save newly discovered malware - handle as list
         new_malwares = stats.get('new_malwares', [])
         if isinstance(new_malwares, list):
@@ -149,13 +166,13 @@ def analyze(request):
         from malware_views.views import create_malware_entries_with_severity, safe_str
 
         all_malware = set()
-        
+
         # Get malware from all_rows
         for row in stats.get('all_rows', []):
             malware_name = row.get('malware', '').strip()
             if malware_name:
                 all_malware.add(malware_name)
-        
+
         # Also get from malware_stats (top 10)
         for item in stats.get('malware_stats', []):
             malware_name = item.get('label', '').strip()
@@ -201,7 +218,7 @@ def analyze(request):
                 try:
                     # Check if entry exists and is newly created
                     entry = MalwareEntry.objects.get(name=malware_name)
-                    # Only generate report if entry was just created in this run or has no report
+                    # Only generate report if entry was just created in this run
                     if entry.first_seen_run_id == run.pk or entry.status == 'new':
                         generate_malware_report(malware_name, entry, request.user)
                         log.info(f"Auto-generated malware report for: {malware_name}")
@@ -231,15 +248,37 @@ def analyze(request):
     except Exception as e:
         log.error(f"Error creating malware entries: {e}")
 
+    # ── Auto-generate threatintel advisories from the uploaded CSVs ──────
+    # Mirrors generate_from_run() in threatintel/views.py but called as a
+    # service directly so no HTTP round-trip is needed. Non-fatal: if this
+    # fails the analysis result and dashboard are unaffected. The manual
+    # "Generate Advisories" button on the dashboard remains as a fallback.
+    try:
+        from threatintel.services import CSVImportService, AdvisoryService
+
+        csv_paths = sorted(glob.glob(os.path.join(upload_dir, '*.csv')))
+        for csv_path in csv_paths:
+            with open(csv_path, 'rb') as f:
+                rows = CSVImportService.parse_csv(f)
+                if rows:
+                    AdvisoryService.process_csv_upload(os.path.basename(csv_path), rows)
+                    log.info(f"Auto-generated advisories from: {os.path.basename(csv_path)}")
+    except ImportError as e:
+        log.warning(f"Threatintel module not available for advisory auto-generation: {e}")
+    except Exception as e:
+        log.error(f"Advisory auto-generation failed (non-fatal): {e}")
+    # ── end advisory auto-generation ─────────────────────────────────────
+
     return redirect('dashboard', run_id=run.pk)
+
 
 @login_required(login_url='/')
 def dashboard(request, run_id):
     run = get_object_or_404(AnalysisRun, pk=run_id, created_by=request.user)
 
-    asn_labels,     asn_values     = run.asn_chart_data()
+    asn_labels, asn_values = run.asn_chart_data()
     malware_labels, malware_values = run.malware_chart_data()
-    ip_labels,      ip_values      = run.ip_chart_data()
+    ip_labels, ip_values = run.ip_chart_data()
 
     # ── ASN legend enrichment ─────────────────────────────────────────────
     # asn_labels contains whatever asn_chart_data() returns — operator names
@@ -277,60 +316,69 @@ def dashboard(request, run_id):
         resolved_asn_numbers.append(asn_num)
 
     # Step 3: latest advisory pk per ASN number — one query, no N+1.
-    from threatintel.models import Advisory as ThreatAdvisory, ASN as ThreatASN
+    try:
+        from threatintel.models import Advisory as ThreatAdvisory, ASN as ThreatASN
 
-    advisory_pk_map = dict(
-        ThreatAdvisory.objects
-        .filter(asn__asn_number__in=[n for n in resolved_asn_numbers if n])
-        .values('asn__asn_number')
-        .annotate(latest_pk=Max('pk'))
-        .values_list('asn__asn_number', 'latest_pk')
-    )  # {"AS13335": 12, "AS3320": 7}
+        advisory_pk_map = dict(
+            ThreatAdvisory.objects
+            .filter(asn__asn_number__in=[n for n in resolved_asn_numbers if n])
+            .values('asn__asn_number')
+            .annotate(latest_pk=Max('pk'))
+            .values_list('asn__asn_number', 'latest_pk')
+        )  # {"AS13335": 12, "AS3320": 7}
 
-    # Bulk fetch org names from threatintel.ASN — used when labels are bare
-    # integers (BGPView offline). One query; keyed by 'AS'-prefixed number.
-    ti_asn_org_map = dict(
-        ThreatASN.objects
-        .filter(asn_number__in=[n for n in resolved_asn_numbers if n])
-        .values_list('asn_number', 'organization_name')
-    )
+        # Bulk fetch org names from threatintel.ASN — used when labels are bare
+        # integers (BGPView offline). One query; keyed by 'AS'-prefixed number.
+        ti_asn_org_map = dict(
+            ThreatASN.objects
+            .filter(asn_number__in=[n for n in resolved_asn_numbers if n])
+            .values_list('asn_number', 'organization_name')
+        )
 
-    # Step 4: build legend items and org-label list for the chart tooltips.
-    asn_legend_items = []
-    asn_org_labels   = []
+        # Step 4: build legend items and org-label list for the chart tooltips.
+        asn_legend_items = []
+        asn_org_labels = []
 
-    for label, asn_num in zip(asn_labels, resolved_asn_numbers):
-        # Display name resolution:
-        #   'AS13335'   → forward_map lookup (KnownASN operator_name) or label
-        #   '37075'     → ti_asn_org_map lookup (threatintel.ASN.organization_name)
-        #   'CLOUDFLARE'→ already an operator name, use directly
-        if label.startswith('AS'):
-            org_name = forward_map.get(label) or label
-        elif label.isdigit():
-            org_name = ti_asn_org_map.get(f'AS{label}') or label
-        else:
-            org_name = label  # already an operator name
+        for label, asn_num in zip(asn_labels, resolved_asn_numbers):
+            # Display name resolution:
+            #   'AS13335'   → forward_map lookup (KnownASN operator_name) or label
+            #   '37075'     → ti_asn_org_map lookup (threatintel.ASN.organization_name)
+            #   'CLOUDFLARE'→ already an operator name, use directly
+            if label.startswith('AS'):
+                org_name = forward_map.get(label) or label
+            elif label.isdigit():
+                org_name = ti_asn_org_map.get(f'AS{label}') or label
+            else:
+                org_name = label  # already an operator name
 
-        advisory_pk  = advisory_pk_map.get(asn_num) if asn_num else None
-        advisory_url = f"/intel/advisories/{advisory_pk}/" if advisory_pk else None
+            advisory_pk = advisory_pk_map.get(asn_num) if asn_num else None
+            advisory_url = f"/intel/advisories/{advisory_pk}/" if advisory_pk else None
 
-        asn_org_labels.append(org_name)
-        asn_legend_items.append({
-            'org_name':     org_name,
-            'asn':          asn_num or label,
-            'advisory_url': advisory_url,
-        })
+            asn_org_labels.append(org_name)
+            asn_legend_items.append({
+                'org_name': org_name,
+                'asn': asn_num or label,
+                'advisory_url': advisory_url,
+            })
+    except ImportError as e:
+        log.warning(f"Threatintel module not available for ASN enrichment: {e}")
+        asn_org_labels = asn_labels
+        asn_legend_items = []
+    except Exception as e:
+        log.warning(f"ASN enrichment failed (non-fatal): {e}")
+        asn_org_labels = asn_labels
+        asn_legend_items = []
     # ── end ASN legend enrichment ─────────────────────────────────────────
 
     return render(request, 'analyzer/dashboard.html', {
-        'run':              run,
-        'asn_labels':       json.dumps(asn_org_labels),   # org names for chart tooltips
-        'asn_values':       json.dumps(asn_values),       # counts unchanged
-        'asn_legend_items': asn_legend_items,             # server-rendered legend
-        'malware_labels':   json.dumps(malware_labels),
-        'malware_values':   json.dumps(malware_values),
-        'ip_labels':        json.dumps(ip_labels),
-        'ip_values':        json.dumps(ip_values),
+        'run': run,
+        'asn_labels': json.dumps(asn_org_labels),  # org names for chart tooltips
+        'asn_values': json.dumps(asn_values),      # counts unchanged
+        'asn_legend_items': asn_legend_items,      # server-rendered legend
+        'malware_labels': json.dumps(malware_labels),
+        'malware_values': json.dumps(malware_values),
+        'ip_labels': json.dumps(ip_labels),
+        'ip_values': json.dumps(ip_values),
     })
 
 
@@ -350,3 +398,16 @@ def download_results(request, run_id):
         response = HttpResponse(f.read(), content_type='application/zip')
         response['Content-Disposition'] = f'attachment; filename="results_run_{run_id}.zip"'
         return response
+
+
+# ── API endpoint for getting the most recent run ──────────────────────────────
+def get_recent_run(request):
+    """
+    Get the most recent analysis run for the current user.
+    Used by the malware list page to navigate back to the dashboard.
+    """
+    if request.user.is_authenticated:
+        run = AnalysisRun.objects.filter(created_by=request.user).order_by('-created_at').first()
+        if run:
+            return JsonResponse({'run_id': run.pk})
+    return JsonResponse({'run_id': None})

@@ -4,16 +4,11 @@
 {% block content %}
 <div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto;">
   <div class="dashboard-header" style="margin-bottom:1rem;">
+    <!-- Back Button -->
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
-      {% if dashboard_run_id %}
-        <a href="{% url 'dashboard' dashboard_run_id %}" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
-          ⬅ Back
-        </a>
-      {% else %}
-        <a href="/" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
-          ⬅ Back
-        </a>
-      {% endif %}
+      <a href="javascript:history.back()" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+        ⬅ Back
+      </a>
     </div>
     <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">📢 Advisories</h1>
   </div>
@@ -55,7 +50,8 @@
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Advisory #</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Date</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Organization</th>
-          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Malware Families</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Malware</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Risk Level</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Status</th>
         </tr>
       </thead>
@@ -65,21 +61,16 @@
           <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' advisory.pk %}" style="color:var(--emerald); font-weight:500; text-decoration:none;">{{ advisory.advisory_number|default:"Draft" }}</a></td>
           <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ advisory.advisory_date|date:"M j, Y" }}</td>
           <td style="padding:1rem;">{{ advisory.asn.get_display_name }}</td>
+          <td style="padding:1rem; font-family:monospace; color:var(--cyan);">{{ advisory.malware.malware_name }}</td>
           <td style="padding:1rem;">
-            {% if advisory.malware_list %}
-              <details style="cursor:pointer;">
-                <summary style="font-family:monospace; color:var(--cyan); list-style:none; display:flex; align-items:center; gap:0.4rem;">
-                  <span style="font-size:0.7rem; transition:transform 0.2s;">▶</span>
-                  {{ advisory.malware_list|length }} malware famil{{ advisory.malware_list|length|pluralize:"y,ies" }}
-                </summary>
-                <ul style="margin:0.5rem 0 0 0; padding:0 0 0 1rem; list-style:disc;">
-                  {% for mw in advisory.malware_list %}
-                  <li style="font-family:monospace; color:var(--cyan); font-size:0.85rem; padding:0.15rem 0;">{{ mw.malware_name }}</li>
-                  {% endfor %}
-                </ul>
-              </details>
+            {% if advisory.malware.risk_level == "Critical" %}
+              <span style="background:rgba(225,29,72,0.15); color:#f43f5e; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(225,29,72,0.3);">CRITICAL</span>
+            {% elif advisory.malware.risk_level == "High" %}
+              <span style="background:rgba(217,119,6,0.15); color:#fbbf24; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(217,119,6,0.3);">HIGH</span>
+            {% elif advisory.malware.risk_level == "Medium" %}
+              <span style="background:rgba(37,99,235,0.15); color:#60a5fa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(37,99,235,0.3);">MEDIUM</span>
             {% else %}
-              <span style="color:var(--text-muted);">—</span>
+              <span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(148,163,184,0.3);">{{ advisory.malware.risk_level|upper }}</span>
             {% endif %}
           </td>
           <td style="padding:1rem;">
@@ -92,7 +83,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="5" style="padding:3rem; text-align:center; color:var(--text-muted);">
+          <td colspan="6" style="padding:3rem; text-align:center; color:var(--text-muted);">
             <div style="font-size:2rem; margin-bottom:1rem; opacity:0.5;">📭</div>
             {% if filter_asn or filter_malware %}
               No advisories match the current filters.
@@ -106,11 +97,4 @@
     </table>
   </div>
 </div>
-
-<style>
-  /* Rotate arrow indicator when details is open */
-  details[open] > summary > span:first-child {
-    transform: rotate(90deg);
-  }
-</style>
 {% endblock %}

@@ -18,23 +18,11 @@
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
       <div><strong style="color:var(--text-primary);">Organization Name:</strong><br>{{ asn.organization_name|default:"Unknown" }}</div>
       <div><strong style="color:var(--text-primary);">Country:</strong><br>{{ asn.country|default:"Unknown" }}</div>
+      <div><strong style="color:var(--text-primary);">Contact Email:</strong><br>{{ asn.contact_email|default:"None" }}</div>
       <div><strong style="color:var(--text-primary);">First Seen:</strong><br>{{ asn.created_at|date:"Y-m-d H:i" }}</div>
-      <div><strong style="color:var(--text-primary);">Last Seen:</strong><br><span style="color:#ffffff;">{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</span></div>
+      <div><strong style="color:var(--text-primary);">Last Seen:</strong><br>{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</div>
     </div>
   </div>
-
-  <style>
-    /* Hide standard details marker across browsers */
-    details > summary {
-      list-style: none;
-    }
-    details > summary::-webkit-details-marker {
-      display: none;
-    }
-    details[open] .arrow {
-      transform: rotate(90deg);
-    }
-  </style>
 
   <h4 style="color:#fff; margin-bottom:1rem;">Associated Advisories</h4>
   <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden;">
@@ -44,42 +32,42 @@
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Advisory #</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Date</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Malware</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Risk Level</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Status</th>
         </tr>
       </thead>
       <tbody>
-        {% if has_advisories %}
+        {% for advisory in asn.advisories.all %}
         <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
-          <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' latest_advisory.pk %}" style="color:var(--emerald); text-decoration:none; font-weight:600;">{{ latest_advisory.advisory_number|default:"Draft" }}</a></td>
-          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ latest_advisory.advisory_date }}</td>
+          <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' advisory.pk %}" style="color:var(--emerald); text-decoration:none;">{{ advisory.advisory_number|default:"Draft" }}</a></td>
+          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ advisory.advisory_date }}</td>
+          <td style="padding:1rem;">{{ advisory.malware.malware_name }}</td>
           <td style="padding:1rem;">
-            <details style="cursor: pointer; outline: none; user-select: none;">
-              <summary style="color:var(--emerald); font-weight:600; list-style: none; display: flex; align-items: center; gap: 0.35rem;">
-                <span class="arrow" style="transition: transform 0.2s ease-in-out; display: inline-block; font-size: 0.75rem;">▶</span>
-                Detected Malware ({{ all_malware_families|length }})
-              </summary>
-              <ul style="margin: 0.5rem 0 0 1.25rem; padding: 0; list-style-type: disc; color: var(--text-primary);">
-                {% for mw in all_malware_families %}
-                  <li style="margin-bottom: 0.25rem;">{{ mw.malware_name }}</li>
-                {% endfor %}
-              </ul>
-            </details>
+            {% if advisory.malware.risk_level == "Critical" %}
+              <span style="background:rgba(225,29,72,0.15); color:#f43f5e; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(225,29,72,0.3);">CRITICAL</span>
+            {% elif advisory.malware.risk_level == "High" %}
+              <span style="background:rgba(217,119,6,0.15); color:#fbbf24; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(217,119,6,0.3);">HIGH</span>
+            {% elif advisory.malware.risk_level == "Medium" %}
+              <span style="background:rgba(37,99,235,0.15); color:#60a5fa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(37,99,235,0.3);">MEDIUM</span>
+            {% else %}
+              <span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(148,163,184,0.3);">{{ advisory.malware.risk_level|upper }}</span>
+            {% endif %}
           </td>
           <td style="padding:1rem;">
-            {% if latest_advisory.status == "sent" %}
+            {% if advisory.status == "sent" %}
               <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
             {% else %}
               <span style="background:rgba(255,255,255,0.05); color:var(--text-primary); font-weight:500; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.2);">Draft</span>
             {% endif %}
           </td>
         </tr>
-        {% else %}
+        {% empty %}
         <tr>
-          <td colspan="4" style="padding:3rem; text-align:center; color:var(--text-muted);">
+          <td colspan="5" style="padding:3rem; text-align:center; color:var(--text-muted);">
             No advisories generated yet.
           </td>
         </tr>
-        {% endif %}
+        {% endfor %}
       </tbody>
     </table>
   </div>

@@ -20,6 +20,7 @@
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">ASN</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Organization</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Country</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Contact</th>
           <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Last Seen</th>
         </tr>
       </thead>
@@ -29,11 +30,12 @@
           <td style="padding:1rem;"><a href="{% url 'threatintel:asn-detail' asn.pk %}" style="color:var(--emerald); font-weight:500; text-decoration:none;">{{ asn.asn_number }}</a></td>
           <td style="padding:1rem;">{{ asn.organization_name|default:"-" }}</td>
           <td style="padding:1rem;">{{ asn.country|default:"-" }}</td>
-          <td style="padding:1rem; color:#ffffff;">{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</td>
+          <td style="padding:1rem; color:var(--text-muted);">{{ asn.contact_email|default:"-" }}</td>
+          <td style="padding:1rem; color:var(--text-muted);">{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="4" style="padding:3rem; text-align:center; color:var(--text-muted);">
+          <td colspan="5" style="padding:3rem; text-align:center; color:var(--text-muted);">
             <div style="font-size:2rem; margin-bottom:1rem; opacity:0.5;">📉</div>
             No ASNs found.
           </td>

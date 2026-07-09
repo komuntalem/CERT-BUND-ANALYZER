@@ -31,16 +31,6 @@ urlpatterns = [
         name="download-email-docx",
     ),
     path(
-        "advisories/<int:pk>/save-html/",
-        views.save_advisory_html,
-        name="save-advisory-html",
-    ),
-    path(
-        "advisories/<int:pk>/regenerate-html/",
-        views.regenerate_advisory_html,
-        name="regenerate-advisory-html",
-    ),
-    path(
         "advisories/<int:pk>/gmail/",
         views.open_gmail_draft,
         name="gmail-draft",

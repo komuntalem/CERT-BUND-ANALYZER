@@ -19,8 +19,8 @@
   <div class="dashboard-header" style="margin-bottom:1rem;">
     <!-- Back Button -->
     <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
-      <a href="{% url 'threatintel:advisory-list' %}" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
-        ⬅ Back to Advisories
+      <a href="javascript:history.back()" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+        ⬅ Back
       </a>
     </div>
     <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">📄 {{ advisory.advisory_number|default:"Draft Advisory" }}</h1>
@@ -32,18 +32,19 @@
       <div style="color:var(--text-primary); font-weight:600;">ASN</div>
       <div><a href="{% url 'threatintel:asn-detail' advisory.asn.pk %}" style="color:var(--emerald); text-decoration:none;">{{ advisory.asn.asn_number }}</a> — {{ advisory.asn.get_display_name }}</div>
 
-      <div style="color:var(--text-primary); font-weight:600;">Malware Families</div>
+      <div style="color:var(--text-primary); font-weight:600;">Malware</div>
+      <div>{{ advisory.malware.malware_name }}</div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Risk Level</div>
       <div>
-        {% if malware_list %}
-          <ul style="margin:0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:0.4rem;">
-            {% for mw in malware_list %}
-            <li>
-              <span style="font-family:monospace; color:var(--cyan); font-size:0.9rem;">{{ mw.malware_name }}</span>
-            </li>
-            {% endfor %}
-          </ul>
+        {% if advisory.malware.risk_level == "Critical" %}
+          <span style="background:rgba(225,29,72,0.15); color:#f43f5e; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(225,29,72,0.3);">CRITICAL</span>
+        {% elif advisory.malware.risk_level == "High" %}
+          <span style="background:rgba(217,119,6,0.15); color:#fbbf24; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(217,119,6,0.3);">HIGH</span>
+        {% elif advisory.malware.risk_level == "Medium" %}
+          <span style="background:rgba(37,99,235,0.15); color:#60a5fa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(37,99,235,0.3);">MEDIUM</span>
         {% else %}
-          <span style="color:var(--text-muted);">—</span>
+          <span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(148,163,184,0.3);">{{ advisory.malware.risk_level|upper }}</span>
         {% endif %}
       </div>
 
@@ -61,163 +62,63 @@
     </div>
   </div>
 
-  <!-- Small form for metadata fields (Advisory Number & Date) -->
-  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Advisory Metadata</h3>
+  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Edit Advisory</h3>
   <form method="post" style="border-bottom:1px solid var(--border); padding-bottom:1.5rem; margin-bottom:2rem;">
     {% csrf_token %}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1.5rem; margin-bottom:1.5rem;">
       <div>
-        <label for="id_advisory_number" style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Number</label>
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Number</label>
         {{ form.advisory_number }}
       </div>
       <div>
-        <label for="id_advisory_date" style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Date</label>
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Date</label>
         {{ form.advisory_date }}
       </div>
     </div>
+    <div style="margin-bottom:1.5rem;">
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Summary</label>
+        {{ form.summary }}
+    </div>
+    <div style="margin-bottom:1.5rem;">
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Recommended Mitigation</label>
+        {{ form.recommended_mitigation }}
+    </div>
+    <div style="margin-bottom:1.5rem;">
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Full Content</label>
+        {{ form.content }}
+    </div>
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <button class="btn btn-primary" type="submit">💾 Save Metadata</button>
-        <a class="btn btn-ghost" href="{% url 'threatintel:download-advisory-docx' advisory.pk %}">⬇ Download Advisory .docx</a>
+        <button class="btn btn-primary" type="submit">Save Advisory</button>
+        <a class="btn btn-ghost" href="{% url 'threatintel:download-advisory-docx' advisory.pk %}">⬇ Advisory .docx</a>
         {% if has_email_draft %}
+            <a class="btn btn-ghost" href="{% url 'threatintel:download-email-docx' advisory.pk %}">⬇ Email .docx</a>
             <a class="btn btn-ghost" style="border-color:rgba(16,217,122,0.3); color:var(--emerald);" href="{% url 'threatintel:gmail-draft' advisory.pk %}" target="_blank">✉ Open Gmail Draft</a>
         {% endif %}
     </div>
   </form>
 
-  <!-- Centered TinyMCE Rich Text Editor Layout -->
-  <div style="display:flex; justify-content:center; margin-top:2rem;">
-    <div style="width:100%; max-width:900px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; display:flex; flex-direction:column; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      <div style="padding:0.5rem 1rem; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.2); flex-shrink:0; display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-size:0.75rem; font-weight:600; color:var(--text-muted);">✏️ Edit Advisory Content (Rich Text)</span>
-        <div style="display:flex; gap:0.5rem;">
-          <button onclick="regenerateAdvisory()" class="btn btn-ghost" style="padding:0.25rem 0.6rem; font-size:0.7rem; border-color:rgba(255,255,255,0.1);">🔄 Regenerate</button>
-          <button onclick="saveAdvisoryContent()" class="btn btn-primary" id="save-content-btn" style="padding:0.25rem 0.6rem; font-size:0.7rem;">💾 Save Content</button>
-        </div>
-      </div>
-      <form id="advisory-html-form" style="flex:1; display:flex; flex-direction:column;">
-        {% csrf_token %}
-        <textarea id="advisory-editor" name="html_content">{{ advisory_html|safe }}</textarea>
-      </form>
+  {% if has_email_draft %}
+  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Email Draft <span style="font-size:0.8rem; color:var(--text-muted); font-weight:400;">(auto-generated — save the advisory to refresh)</span></h3>
+  <div style="padding-top:0.5rem;">
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Subject</label>
+      <div style="padding:0.5rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary);">{{ advisory.email_draft.subject }}</div>
+    </div>
+    <div>
+      <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Body</label>
+      <pre style="padding:0.75rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); white-space:pre-wrap; font-family:inherit; font-size:0.9rem; margin:0;">{{ advisory.email_draft.body }}</pre>
     </div>
   </div>
+  {% else %}
+  <div style="padding:1rem; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:var(--radius-sm); color:var(--cyan); margin-bottom:2rem;">
+      No email draft yet — click <strong>Save Advisory</strong> above to auto-generate one.
+  </div>
+  {% endif %}
 
   </div> <!-- End card-body -->
 </div> <!-- End card -->
 
 </div>
-
-<!-- Include TinyMCE via cdnjs (Free, Open Source version, no API key required) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tinymce/6.8.2/tinymce.min.js" referrerpolicy="origin"></script>
-<script>
-  tinymce.init({
-    selector: '#advisory-editor',
-    height: 800,
-    menubar: false,
-    plugins: [
-      'advlist', 'autolink', 'lists', 'link', 'image', 'charmap', 'preview',
-      'anchor', 'searchreplace', 'visualblocks', 'code', 'fullscreen',
-      'insertdatetime', 'media', 'table', 'help', 'wordcount'
-    ],
-    toolbar: 'undo redo | blocks | fontfamily fontsize | ' +
-      'bold italic forecolor | alignleft aligncenter ' +
-      'alignright alignjustify | bullist numlist outdent indent | ' +
-      'removeformat | help',
-    font_family_formats: 'Bookman Old Style=Bookman Old Style, Book Antiqua, Palatino Linotype, Georgia, serif; Andale Mono=andale mono,times; Arial=arial,helvetica,sans-serif; Arial Black=arial black,avant garde; Book Antiqua=book antiqua,palatino; Comic Sans MS=comic sans ms,sans-serif; Courier New=courier new,courier; Georgia=georgia,palatino; Helvetica=helvetica; Impact=impact,chicago; Symbol=webdings; Tahoma=tahoma,arial,helvetica,sans-serif; Terminal=terminal,monaco; Times New Roman=times new roman,times; Trebuchet MS=trebuchet ms,geneva; Verdana=verdana,geneva; Webdings=webdings; Wingdings=wingdings,zapf dingbats',
-    content_style: `
-      body { 
-        font-family: 'Bookman Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif; 
-        font-size: 12pt; 
-        line-height: 1.5; 
-        color: #000000; 
-        background: #ffffff; 
-        padding: 40px; 
-        margin: 0 auto;
-        text-align: justify;
-      }
-      p { margin: 0 0 12px 0; }
-      h1, h2, h3 { color: #000000; font-weight: bold; margin-bottom: 8px; }
-      h1 { font-size: 16pt; }
-      h2 { font-size: 14pt; margin-top: 18px; }
-      ul, ol { margin: 6px 0 10px 24px; padding: 0; }
-      li { margin: 3px 0; }
-      a { color: #0563C1; text-decoration: underline; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-      th, td { border: 1px solid #000000; padding: 10px; text-align: left; }
-      th { background-color: #f2f2f2; font-weight: bold; }
-    `
-  });
-</script>
-
-<script>
-function getEditorContent() {
-  if (tinymce.get('advisory-editor')) {
-    return tinymce.get('advisory-editor').getContent();
-  }
-  return document.getElementById('advisory-editor').value;
-}
-
-function saveAdvisoryContent() {
-  const btn = document.getElementById('save-content-btn');
-  const originalText = btn.textContent;
-  btn.textContent = '⏳ Saving...';
-  btn.disabled = true;
-  
-  const content = getEditorContent();
-  
-  fetch('{% url "threatintel:save-advisory-html" advisory.id %}', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-    },
-    body: JSON.stringify({ html_content: content })
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success) { 
-      alert('✅ Advisory content saved successfully!'); 
-    } else { 
-      alert('❌ Failed to save: ' + (data.error || 'Unknown error')); 
-    }
-  })
-  .catch(() => alert('❌ Network error. Please try again.'))
-  .finally(() => { 
-    btn.textContent = originalText; 
-    btn.disabled = false;
-  });
-}
-
-function regenerateAdvisory() {
-  if (!confirm('Regenerate default content from malware entries? This will overwrite your current unsaved edits.')) return;
-  const btn = event.target;
-  const original = btn.textContent;
-  btn.textContent = '⏳ Generating...';
-  btn.disabled = true;
-  
-  fetch('{% url "threatintel:regenerate-advisory-html" advisory.id %}', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-    }
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.success && data.html_content) { 
-      if (tinymce.get('advisory-editor')) {
-        tinymce.get('advisory-editor').setContent(data.html_content);
-      } else {
-        document.getElementById('advisory-editor').value = data.html_content;
-      }
-      alert('✅ Regenerated successfully! (Remember to save your changes)');
-    } else { 
-      alert('Failed: ' + (data.error || 'Unknown error')); 
-    }
-  })
-  .catch(() => alert('Network error. Please try again.'))
-  .finally(() => { btn.textContent = original; btn.disabled = false; });
-}
-</script>
 
 <style>
   /* Form styling for dark mode */

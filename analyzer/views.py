@@ -173,15 +173,12 @@ def analyze(request):
         from threatintel.services import CSVImportService, AdvisoryService
 
         csv_paths = sorted(glob.glob(os.path.join(upload_dir, '*.csv')))
-        all_rows = []
         for csv_path in csv_paths:
             with open(csv_path, 'rb') as f:
                 rows = CSVImportService.parse_csv(f)
                 if rows:
-                    all_rows.extend(rows)
-        if all_rows:
-            AdvisoryService.process_csv_upload(folder_name, all_rows)
-            log.info(f"Auto-generated advisories for folder: {folder_name}")
+                    AdvisoryService.process_csv_upload(os.path.basename(csv_path), rows)
+                    log.info(f"Auto-generated advisories from: {os.path.basename(csv_path)}")
     except ImportError as e:
         log.warning(f"Threatintel module not available for advisory auto-generation: {e}")
     except Exception as e:

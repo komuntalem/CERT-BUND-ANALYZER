@@ -111,11 +111,10 @@ class Advisory(models.Model):
     advisory_number = models.CharField(max_length=100, blank=True)
     advisory_date = models.DateField(default=timezone.now)
     asn = models.ForeignKey(ASN, on_delete=models.CASCADE, related_name="advisories")
-    malware_families = models.ManyToManyField(
-        Malware, related_name="advisories", blank=True
+    malware = models.ForeignKey(
+        Malware, on_delete=models.CASCADE, related_name="advisories"
     )
     content = models.TextField(blank=True)
-    html_content = models.TextField(blank=True)   # TinyMCE-edited letter HTML
     summary = models.TextField(blank=True)
     recommended_mitigation = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")

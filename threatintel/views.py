@@ -11,7 +11,7 @@ from django.views import View
 from django.views.generic import DetailView, ListView
 
 from .forms import AdvisoryForm, CSVUploadForm, EmailDraftForm
-from .models import Advisory, ASN, AnalysisRun
+from .models import Advisory, ASN, AnalysisRun, EmailDraft
 from .services import AdvisoryService, CSVImportService, DocumentService
 
 
@@ -117,6 +117,22 @@ class AdvisoryListView(ListView):
     template_name = "threatintel/advisory_list.html"
     context_object_name = "advisories"
 
+    def get_queryset(self):
+        qs = Advisory.objects.select_related("asn", "malware").all()
+        asn_filter = self.request.GET.get("asn", "").strip()
+        malware_filter = self.request.GET.get("malware", "").strip()
+        if asn_filter:
+            qs = qs.filter(asn__asn_number__icontains=asn_filter)
+        if malware_filter:
+            qs = qs.filter(malware__malware_name__icontains=malware_filter)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["filter_asn"] = self.request.GET.get("asn", "")
+        ctx["filter_malware"] = self.request.GET.get("malware", "")
+        return ctx
+
 
 class AdvisoryDetailView(View):
     template_name = "threatintel/advisory_detail.html"
@@ -149,26 +165,31 @@ class AdvisoryDetailView(View):
         advisory = get_object_or_404(Advisory, pk=pk)
         form = AdvisoryForm(request.POST, instance=advisory)
 
+        if form.is_valid():
+            # Save advisory and force status to "draft"
+            saved = form.save(commit=False)
+            saved.status = "draft"
+            saved.save()
+
+            # Auto-create or update the EmailDraft with the fixed template
+            subject = (
+                f"Cybersecurity Advisory Notification – "
+                f"{advisory.asn.get_display_name()}"
+            )
+            body = AdvisoryService.build_email_body(advisory)
+            EmailDraft.objects.update_or_create(
+                advisory=advisory,
+                defaults={"subject": subject, "body": body},
+            )
+
+            messages.success(request, "Advisory saved and email draft updated.")
+            return redirect("threatintel:advisory-detail", pk=advisory.pk)
+
+        # Re-fetch email draft for re-render on validation failure
         try:
             email_draft = advisory.email_draft
         except Advisory.email_draft.RelatedObjectDoesNotExist:
             email_draft = None
-
-        email_form = (
-            EmailDraftForm(request.POST, instance=email_draft)
-            if email_draft
-            else None
-        )
-
-        advisory_valid = form.is_valid()
-        email_valid = email_form.is_valid() if email_form else True
-
-        if advisory_valid and email_valid:
-            form.save()
-            if email_form:
-                email_form.save()
-            messages.success(request, "Advisory updated successfully.")
-            return redirect("threatintel:advisory-detail", pk=advisory.pk)
 
         return render(
             request,
@@ -176,7 +197,6 @@ class AdvisoryDetailView(View):
             {
                 "advisory": advisory,
                 "form": form,
-                "email_form": email_form,
                 "has_email_draft": email_draft is not None,
             },
         )
@@ -234,7 +254,7 @@ def open_gmail_draft(request, pk):
     """Open Gmail compose with pre-populated subject and body.
 
     Does NOT send automatically — the analyst enters recipients and reviews
-    the content before sending.
+    the content before sending.  Marks the advisory as "sent" upon opening.
     """
     advisory = get_object_or_404(Advisory, pk=pk)
     try:
@@ -246,4 +266,10 @@ def open_gmail_draft(request, pk):
     subject = quote(email_draft.subject)
     body = quote(email_draft.body)
     gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={subject}&body={body}"
+
+    # Transition advisory status: Draft → Sent
+    if advisory.status != "sent":
+        advisory.status = "sent"
+        advisory.save(update_fields=["status"])
+
     return HttpResponseRedirect(gmail_url)

@@ -17,7 +17,6 @@ class AdvisoryForm(forms.ModelForm):
         fields = [
             "advisory_number",
             "advisory_date",
-            "status",
             "summary",
             "recommended_mitigation",
             "content",
@@ -27,7 +26,6 @@ class AdvisoryForm(forms.ModelForm):
             "advisory_date": forms.DateInput(
                 attrs={"type": "date", "class": "form-control"}
             ),
-            "status": forms.Select(attrs={"class": "form-select"}),
             "summary": forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
             "recommended_mitigation": forms.Textarea(
                 attrs={"rows": 6, "class": "form-control"}

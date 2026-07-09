@@ -42,6 +42,29 @@
   --transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* ── Light Mode Variables ──────────────────────────── */
+:root[data-theme="light"] {
+  --bg-base:      #f8fafc;
+  --bg-card:      rgba(255, 255, 255, 0.85);
+  --bg-elevated:  rgba(255, 255, 255, 0.95);
+  --border:       rgba(0,0,0,0.1);
+  --border-glow:  rgba(59, 130, 246, 0.2);
+
+  --emerald:      #2563eb;
+  --emerald-dim:  #1d4ed8;
+  --cyan:         #0ea5e9;
+  --violet:       #8b5cf6;
+  --rose:         #e11d48;
+  --amber:        #d97706;
+
+  --text-primary:   #0f172a;
+  --text-secondary: #334155;
+  --text-muted:     #64748b;
+
+  --shadow-card: 0 4px 20px rgba(0,0,0,0.05), 0 0 0 1px var(--border);
+  --shadow-glow: 0 0 30px rgba(59,130,246,0.08);
+}
+
 /* ── Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
@@ -510,6 +533,11 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 
   </style>
   {% block extra_head %}{% endblock %}
+  <script>
+    // Apply theme before page loads to prevent flash
+    const savedTheme = localStorage.getItem('cert_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+  </script>
 </head>
 <body>
   <div class="bg-mesh" aria-hidden="true"></div>
@@ -533,6 +561,12 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
         <span class="brand-name">CERT-Bund <span>Analyzer</span></span>
       </a>
       <div class="navbar-actions">
+        <!-- Theme Toggle -->
+        <button id="theme-toggle" class="btn btn-ghost" aria-label="Toggle Theme" style="padding: 0.5rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px;">
+          <svg id="theme-icon-dark" style="display: none; width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+          <svg id="theme-icon-light" style="display: none; width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+        </button>
+
         {% if user.is_authenticated %}
         
           <a href="{% url 'logout' %}" class="btn btn-danger" id="logout-btn">Log out</a>
@@ -559,6 +593,34 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
         }
       }
     };
+
+    // Theme toggle script
+    document.addEventListener('DOMContentLoaded', () => {
+      const toggleBtn = document.getElementById('theme-toggle');
+      const iconDark = document.getElementById('theme-icon-dark');
+      const iconLight = document.getElementById('theme-icon-light');
+      
+      function updateIcon(theme) {
+        if (theme === 'light') {
+          iconDark.style.display = 'block';
+          iconLight.style.display = 'none';
+        } else {
+          iconLight.style.display = 'block';
+          iconDark.style.display = 'none';
+        }
+      }
+
+      // Initialize icon
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      updateIcon(currentTheme);
+
+      toggleBtn.addEventListener('click', () => {
+        const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('cert_theme', theme);
+        updateIcon(theme);
+      });
+    });
   </script>
   {% block extra_js %}{% endblock %}
 </body>

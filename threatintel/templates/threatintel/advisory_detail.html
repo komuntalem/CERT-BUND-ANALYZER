@@ -4,6 +4,8 @@
 {% block content %}
 <div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto; color:var(--text-primary);">
 
+<div class="card" style="margin-top: 1rem;">
+  <div class="card-body">
   {% if messages %}
   <div style="margin-bottom:1rem;">
     {% for message in messages %}
@@ -24,15 +26,16 @@
     <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">📄 {{ advisory.advisory_number|default:"Draft Advisory" }}</h1>
   </div>
 
-  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:2rem;">
+  <!-- Advisory metadata card -->
+  <div style="border-bottom:1px solid var(--border); padding-bottom:1.5rem; margin-bottom:2rem;">
     <div style="display:grid; grid-template-columns:150px 1fr; gap:1rem; font-size:0.95rem;">
-      <div style="color:var(--text-muted); font-weight:600;">ASN</div>
+      <div style="color:var(--text-primary); font-weight:600;">ASN</div>
       <div><a href="{% url 'threatintel:asn-detail' advisory.asn.pk %}" style="color:var(--emerald); text-decoration:none;">{{ advisory.asn.asn_number }}</a> — {{ advisory.asn.get_display_name }}</div>
-      
-      <div style="color:var(--text-muted); font-weight:600;">Malware</div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Malware</div>
       <div>{{ advisory.malware.malware_name }}</div>
-      
-      <div style="color:var(--text-muted); font-weight:600;">Risk Level</div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Risk Level</div>
       <div>
         {% if advisory.malware.risk_level == "Critical" %}
           <span style="background:rgba(225,29,72,0.15); color:#f43f5e; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(225,29,72,0.3);">CRITICAL</span>
@@ -44,14 +47,23 @@
           <span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(148,163,184,0.3);">{{ advisory.malware.risk_level|upper }}</span>
         {% endif %}
       </div>
-      
-      <div style="color:var(--text-muted); font-weight:600;">Created</div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Status</div>
+      <div>
+        {% if advisory.status == "sent" %}
+          <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
+        {% else %}
+          <span style="background:rgba(255,255,255,0.05); color:var(--text-muted); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.1);">Draft</span>
+        {% endif %}
+      </div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Created</div>
       <div>{{ advisory.created_at|date:"Y-m-d H:i" }}</div>
     </div>
   </div>
 
-  <h3 style="color:#fff; margin-bottom:1rem; font-size:1.2rem;">Edit Advisory</h3>
-  <form method="post" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:2rem;">
+  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Edit Advisory</h3>
+  <form method="post" style="border-bottom:1px solid var(--border); padding-bottom:1.5rem; margin-bottom:2rem;">
     {% csrf_token %}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1.5rem; margin-bottom:1.5rem;">
       <div>
@@ -61,10 +73,6 @@
       <div>
         <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Date</label>
         {{ form.advisory_date }}
-      </div>
-      <div>
-        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Status</label>
-        {{ form.status }}
       </div>
     </div>
     <div style="margin-bottom:1.5rem;">
@@ -90,24 +98,25 @@
   </form>
 
   {% if has_email_draft %}
-  <h3 style="color:#fff; margin-bottom:1rem; font-size:1.2rem;">Email Draft</h3>
-  <form method="post" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem;">
-      {% csrf_token %}
-      <div style="margin-bottom:1.5rem;">
-          <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Subject</label>
-          {{ email_form.subject }}
-      </div>
-      <div style="margin-bottom:1.5rem;">
-          <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Body</label>
-          {{ email_form.body }}
-      </div>
-      <button class="btn btn-primary" type="submit">Save Email Draft</button>
-  </form>
+  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Email Draft <span style="font-size:0.8rem; color:var(--text-muted); font-weight:400;">(auto-generated — save the advisory to refresh)</span></h3>
+  <div style="padding-top:0.5rem;">
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Subject</label>
+      <div style="padding:0.5rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary);">{{ advisory.email_draft.subject }}</div>
+    </div>
+    <div>
+      <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Body</label>
+      <pre style="padding:0.75rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); white-space:pre-wrap; font-family:inherit; font-size:0.9rem; margin:0;">{{ advisory.email_draft.body }}</pre>
+    </div>
+  </div>
   {% else %}
   <div style="padding:1rem; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:var(--radius-sm); color:var(--cyan); margin-bottom:2rem;">
-      No email draft has been generated for this advisory yet.
+      No email draft yet — click <strong>Save Advisory</strong> above to auto-generate one.
   </div>
   {% endif %}
+
+  </div> <!-- End card-body -->
+</div> <!-- End card -->
 
 </div>
 

@@ -23,6 +23,26 @@
   </div>
   {% endif %}
 
+  <!-- Search / filter bar -->
+  <form method="get" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.5rem; margin-bottom:1.5rem; display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+    <div style="flex:1; min-width:180px;">
+      <label for="id_filter_asn" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; font-weight:600; color:var(--text-muted);">Filter by ASN</label>
+      <input id="id_filter_asn" type="text" name="asn" value="{{ filter_asn }}" placeholder="e.g. AS13335"
+             style="width:100%; padding:0.45rem 0.7rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;">
+    </div>
+    <div style="flex:1; min-width:180px;">
+      <label for="id_filter_malware" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; font-weight:600; color:var(--text-muted);">Filter by Malware</label>
+      <input id="id_filter_malware" type="text" name="malware" value="{{ filter_malware }}" placeholder="e.g. Emotet"
+             style="width:100%; padding:0.45rem 0.7rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;">
+    </div>
+    <div style="display:flex; gap:0.5rem; align-items:center; padding-bottom:0.05rem;">
+      <button type="submit" class="btn btn-primary" style="padding:0.45rem 1.2rem; font-size:0.9rem;">🔍 Filter</button>
+      {% if filter_asn or filter_malware %}
+      <a href="{% url 'threatintel:advisory-list' %}" class="btn btn-ghost" style="padding:0.45rem 1rem; font-size:0.9rem; border-color:rgba(255,255,255,0.15);">✕ Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
   <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden;">
     <table style="width:100%; border-collapse:collapse; color:var(--text-primary); font-size:0.9rem;">
       <thead style="background:rgba(0,0,0,0.3); border-bottom:1px solid var(--border);">
@@ -39,7 +59,7 @@
         {% for advisory in advisories %}
         <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
           <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' advisory.pk %}" style="color:var(--emerald); font-weight:500; text-decoration:none;">{{ advisory.advisory_number|default:"Draft" }}</a></td>
-          <td style="padding:1rem; color:var(--text-muted);">{{ advisory.advisory_date|date:"M j, Y" }}</td>
+          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ advisory.advisory_date|date:"M j, Y" }}</td>
           <td style="padding:1rem;">{{ advisory.asn.get_display_name }}</td>
           <td style="padding:1rem; font-family:monospace; color:var(--cyan);">{{ advisory.malware.malware_name }}</td>
           <td style="padding:1rem;">
@@ -55,11 +75,9 @@
           </td>
           <td style="padding:1rem;">
             {% if advisory.status == "sent" %}
-              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">Sent</span>
-            {% elif advisory.status == "ready" %}
-              <span style="background:rgba(139,92,246,0.15); color:#a78bfa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(139,92,246,0.3);">Ready</span>
+              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
             {% else %}
-              <span style="background:rgba(255,255,255,0.05); color:var(--text-muted); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.1);">Draft</span>
+              <span style="background:rgba(255,255,255,0.05); color:var(--text-primary); font-weight:500; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.2);">Draft</span>
             {% endif %}
           </td>
         </tr>
@@ -67,7 +85,11 @@
         <tr>
           <td colspan="6" style="padding:3rem; text-align:center; color:var(--text-muted);">
             <div style="font-size:2rem; margin-bottom:1rem; opacity:0.5;">📭</div>
-            No advisories generated yet.
+            {% if filter_asn or filter_malware %}
+              No advisories match the current filters.
+            {% else %}
+              No advisories generated yet.
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

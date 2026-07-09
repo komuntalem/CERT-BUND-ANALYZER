@@ -16,11 +16,11 @@
   <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:2rem; color:var(--text-primary);">
     <h5 style="color:var(--emerald); margin-bottom:1rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:0.5rem;">Organization Details</h5>
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
-      <div><strong style="color:var(--text-muted);">Organization Name:</strong><br>{{ asn.organization_name|default:"Unknown" }}</div>
-      <div><strong style="color:var(--text-muted);">Country:</strong><br>{{ asn.country|default:"Unknown" }}</div>
-      <div><strong style="color:var(--text-muted);">Contact Email:</strong><br>{{ asn.contact_email|default:"None" }}</div>
-      <div><strong style="color:var(--text-muted);">First Seen:</strong><br>{{ asn.created_at|date:"Y-m-d H:i" }}</div>
-      <div><strong style="color:var(--text-muted);">Last Seen:</strong><br>{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</div>
+      <div><strong style="color:var(--text-primary);">Organization Name:</strong><br>{{ asn.organization_name|default:"Unknown" }}</div>
+      <div><strong style="color:var(--text-primary);">Country:</strong><br>{{ asn.country|default:"Unknown" }}</div>
+      <div><strong style="color:var(--text-primary);">Contact Email:</strong><br>{{ asn.contact_email|default:"None" }}</div>
+      <div><strong style="color:var(--text-primary);">First Seen:</strong><br>{{ asn.created_at|date:"Y-m-d H:i" }}</div>
+      <div><strong style="color:var(--text-primary);">Last Seen:</strong><br>{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</div>
     </div>
   </div>
 
@@ -37,10 +37,10 @@
         </tr>
       </thead>
       <tbody>
-        {% for advisory in asn.advisory_set.all %}
+        {% for advisory in asn.advisories.all %}
         <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
           <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' advisory.pk %}" style="color:var(--emerald); text-decoration:none;">{{ advisory.advisory_number|default:"Draft" }}</a></td>
-          <td style="padding:1rem; color:var(--text-muted);">{{ advisory.advisory_date }}</td>
+          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ advisory.advisory_date }}</td>
           <td style="padding:1rem;">{{ advisory.malware.malware_name }}</td>
           <td style="padding:1rem;">
             {% if advisory.malware.risk_level == "Critical" %}
@@ -55,11 +55,9 @@
           </td>
           <td style="padding:1rem;">
             {% if advisory.status == "sent" %}
-              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">Sent</span>
-            {% elif advisory.status == "ready" %}
-              <span style="background:rgba(139,92,246,0.15); color:#a78bfa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(139,92,246,0.3);">Ready</span>
+              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
             {% else %}
-              <span style="background:rgba(255,255,255,0.05); color:var(--text-muted); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.1);">Draft</span>
+              <span style="background:rgba(255,255,255,0.05); color:var(--text-primary); font-weight:500; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.2);">Draft</span>
             {% endif %}
           </td>
         </tr>

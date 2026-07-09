@@ -125,23 +125,101 @@ class ASNLookupService:
             log.debug("PeeringDB lookup failed for AS%s: %s", asn_num, exc)
         return "", ""
 
+    # -- RIPE Stat REST API (third fallback) ----------------------------------
+
+    @staticmethod
+    def _lookup_ripestat(asn_num: str) -> tuple[str, str]:
+        """Query the RIPE Stat AS-overview endpoint as a third fallback.
+
+        Covers all five RIRs (RIPE, ARIN, APNIC, LACNIC, AFRINIC) and returns
+        the authoritative holder name registered with the routing registry.
+        No API key required.  Endpoint is stable and publicly documented.
+
+        API: https://stat.ripe.net/data/as-overview/data.json?resource=AS<n>
+        Returns (organization_name, country_code).
+        """
+        try:
+            url = (
+                f"https://stat.ripe.net/data/as-overview/data.json"
+                f"?resource=AS{asn_num}"
+            )
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "CERT-BUND-Analyzer/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                holder = data.get("data", {}).get("holder", "")
+                if holder:
+                    return holder, ""
+        except Exception as exc:
+            log.debug("RIPE Stat lookup failed for AS%s: %s", asn_num, exc)
+        return "", ""
+
+    # -- Name normalisation ---------------------------------------------------
+
+    @staticmethod
+    def _clean_org_name(name: str) -> str:
+        """Normalise raw organisation-name strings from external sources.
+
+        Different sources return names with different artefacts:
+
+        * Team Cymru TXT records:  ``CLOUDFLARENET, US``
+          (routing handle + comma + 2-letter country code)
+        * RIPE Stat holder field:  ``CLOUDFLARENET - Cloudflare, Inc.``
+          (short ASN handle + " - " + full registered name)
+
+        Strategy:
+          1. If the name contains " - ", split on the first occurrence and
+             keep the **longer** side — that is always the human-readable
+             registered name, never the terse routing handle.
+          2. Strip a trailing ", XX" 2-letter country-code suffix.
+          3. Collapse extra whitespace.
+        """
+        if not name:
+            return name
+        name = name.strip()
+        # "HANDLE - Full Registered Name"  →  take the longer part
+        if " - " in name:
+            left, right = name.split(" - ", 1)
+            name = right.strip() if len(right.strip()) >= len(left.strip()) else left.strip()
+        # "ORG NAME, US"  →  strip trailing 2-letter country-code suffix
+        name = re.sub(r",\s*[A-Z]{2}$", "", name).strip()
+        return name
+
     # -- Public API -----------------------------------------------------------
 
     @staticmethod
     def resolve_organization(asn_number: str) -> tuple[str, str]:
-        """Resolve ASN to (org_name, country). Tries Cymru then PeeringDB."""
+        """Resolve ASN to (org_name, country).
+
+        Resolution order:
+            1. Team Cymru DNS TXT  (nslookup — fast, authoritative)
+            2. PeeringDB REST API  (covers voluntarily-registered networks)
+            3. RIPE Stat REST API  (covers all 5 RIRs — broadest coverage)
+
+        The winning name is always passed through ``_clean_org_name()`` to
+        strip routing-handle prefixes and country-code suffixes before storage.
+        """
         asn_num = ASNLookupService._extract_asn_number(asn_number)
         if not asn_num.isdigit():
             return "", ""
 
         org, country = ASNLookupService._lookup_cymru(asn_num)
         if org:
+            org = ASNLookupService._clean_org_name(org)
             log.info("Team Cymru resolved AS%s → %s (%s)", asn_num, org, country)
             return org, country
 
         org, country = ASNLookupService._lookup_peeringdb(asn_num)
         if org:
+            org = ASNLookupService._clean_org_name(org)
             log.info("PeeringDB resolved AS%s → %s", asn_num, org)
+            return org, country
+
+        org, country = ASNLookupService._lookup_ripestat(asn_num)
+        if org:
+            org = ASNLookupService._clean_org_name(org)
+            log.info("RIPE Stat resolved AS%s → %s", asn_num, org)
             return org, country
 
         log.warning("Could not resolve organization for AS%s.", asn_num)
@@ -349,17 +427,21 @@ class AdvisoryService:
         return f"{prefix}{seq:04d}"
 
     @staticmethod
-    def build_email_body(advisory: Advisory) -> str:
-        """Build a structured email body for an advisory notification."""
+    def build_email_body(advisory: Advisory) -> str:  # noqa: ARG004  (advisory kept for API compat)
+        """Return the fixed notification email body template.
+
+        The body is intentionally static — sensitive advisory details are
+        communicated via the attached DOCX document, not the email body.
+        """
         return (
-            f"Advisory Number: {advisory.advisory_number}\n"
-            f"Date: {advisory.advisory_date}\n"
-            f"Organization Name: {advisory.asn.get_display_name()}\n"
-            f"ASN: {advisory.asn.asn_number}\n"
-            f"Malware Detected: {advisory.malware.malware_name}\n"
-            f"Risk Level: {advisory.malware.risk_level}\n\n"
-            f"Summary:\n{advisory.summary}\n\n"
-            f"Recommended Mitigation Actions:\n{advisory.recommended_mitigation}\n"
+            "Hello,\n\n"
+            "Please find attached a security advisory regarding detected "
+            "malicious activity associated with your network.\n\n"
+            "Kindly review the advisory and take the recommended actions "
+            "to address the identified issue.\n\n"
+            "Thank you.\n\n"
+            "Regards,\n"
+            "CERT Team"
         )
 
     @staticmethod

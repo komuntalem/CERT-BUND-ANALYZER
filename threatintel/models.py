@@ -105,7 +105,6 @@ class AttackEvent(models.Model):
 class Advisory(models.Model):
     STATUS_CHOICES = [
         ("draft", "Draft"),
-        ("ready", "Ready"),
         ("sent", "Sent"),
     ]
 

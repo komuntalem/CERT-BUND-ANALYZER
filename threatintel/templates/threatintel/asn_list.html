@@ -1,0 +1,48 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}ASNs — CERT-BUND Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto;">
+  <div class="dashboard-header" style="margin-bottom:1rem;">
+    <!-- Back Button -->
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+      <a href="javascript:history.back()" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+        ⬅ Back
+      </a>
+    </div>
+    <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">🌐 Autonomous Systems</h1>
+  </div>
+
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden;">
+    <table style="width:100%; border-collapse:collapse; color:var(--text-primary); font-size:0.9rem;">
+      <thead style="background:rgba(0,0,0,0.3); border-bottom:1px solid var(--border);">
+        <tr>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">ASN</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Organization</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Country</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Contact</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Last Seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for asn in asns %}
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
+          <td style="padding:1rem;"><a href="{% url 'threatintel:asn-detail' asn.pk %}" style="color:var(--emerald); font-weight:500; text-decoration:none;">{{ asn.asn_number }}</a></td>
+          <td style="padding:1rem;">{{ asn.organization_name|default:"-" }}</td>
+          <td style="padding:1rem;">{{ asn.country|default:"-" }}</td>
+          <td style="padding:1rem; color:var(--text-muted);">{{ asn.contact_email|default:"-" }}</td>
+          <td style="padding:1rem; color:var(--text-muted);">{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" style="padding:3rem; text-align:center; color:var(--text-muted);">
+            <div style="font-size:2rem; margin-bottom:1rem; opacity:0.5;">📉</div>
+            No ASNs found.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

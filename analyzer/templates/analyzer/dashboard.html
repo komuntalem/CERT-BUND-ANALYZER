@@ -1,0 +1,382 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}Dashboard — {{ run.folder_name }} — CERT-Bund Analyzer{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout">
+
+  <div class="dashboard-header">
+   
+    <h1 class="dashboard-title">Threat Analysis Report</h1>
+    <div class="dashboard-meta">
+    
+      <span> {{ run.created_at|date:"N j, Y " }}</span>
+     
+    </div>
+  </div>
+
+  {% if run.new_malwares %}
+  <div class="malware-banner" role="alert">
+    <span class="malware-banner-icon" aria-hidden="true">⚠️</span>
+    <div>
+      <div class="malware-banner-title">New Malware Discovered</div>
+      <p>The following new malware families were detected in this run: 
+         <strong>{{ run.new_malwares|join:", " }}</strong>
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="stat-grid" role="list" aria-label="Summary statistics">
+    <div class="stat-card" role="listitem" style="--accent-color: rgba(16,217,122,0.06);">
+      <span class="stat-icon" aria-hidden="true"></span>
+      <div class="stat-label">Total Events</div>
+      <div class="stat-value emerald" id="stat-total">{{ run.total_rows }}</div>
+    </div>
+    <div class="stat-card" role="listitem" style="--accent-color: rgba(16,217,122,0.06);">
+      <span class="stat-icon" aria-hidden="true"></span>
+      <div class="stat-label">New Events (Added to Baseline)</div>
+      <div class="stat-value emerald" id="stat-new-events">{{ new_events_count }}</div>
+    </div>
+    <div class="stat-card" role="listitem" style="--accent-color: rgba(34,211,238,0.06);">
+      <span class="stat-icon" aria-hidden="true"></span>
+      <div class="stat-label">Unique ASNs</div>
+      <div class="stat-value cyan" id="stat-asns">{{ run.unique_asns }}</div>
+    </div>
+    <div class="stat-card " role="listitem" style="--accent-color: rgba(167,139,250,0.06);">
+      <span class="stat-icon" aria-hidden="true"></span>
+      <div class="stat-label">Malware Families </span></div>
+      <div class="stat-value violet" id="stat-malwares">{{ run.unique_malwares }}</div>
+    </div>
+    <div class="stat-card" role="listitem" style="--accent-color: rgba(245,158,11,0.06);">
+      <span class="stat-icon" aria-hidden="true"></span>
+      <div class="stat-label">Unique Victim IPs</div>
+      <div class="stat-value amber" id="stat-ips">{{ run.unique_ips }}</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+
+    <div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title"> ASNs Attacked</div>
+        <div class="chart-card-subtitle">Top {{ run.asn_stats|length }} autonomous systems targeted</div>
+      </div>
+      {% if run.asn_stats %}
+        <div class="chart-container" style="height:280px;">
+          <canvas id="asn-chart" aria-label="ASNs Attacked pie chart" role="img"></canvas>
+          <div class="chart-center-label">
+            <div class="chart-center-value">{{ run.unique_asns }}</div>
+            <div class="chart-center-text">ASNs</div>
+          </div>
+        </div>
+        <div class="chart-legend" aria-label="ASN legend">
+          {% for item in asn_legend_items %}
+          <div class="legend-item">
+            <span class="legend-dot asn-dot" data-index="{{ forloop.counter0 }}"></span>
+            <span class="legend-label" title="{{ item.asn }}">{{ item.org_name }}</span>
+            {% if item.advisory_url %}
+            <a href="{{ item.advisory_url }}" class="legend-value" style="color:var(--cyan); font-size:0.65rem; text-decoration:none; border:1px solid rgba(34,211,238,0.3); border-radius:999px; padding:0.1rem 0.5rem;" title="View Advisory">Advisory ↗</a>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="no-data-state"><div class="icon" aria-hidden="true"></div><p>No ASN data available</p></div>
+      {% endif %}
+    </div>
+
+    <div class="chart-card clickable" onclick="window.location.href='{% url 'malware_list' %}'">
+      <div class="chart-card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div class="chart-card-title"> Detected Malwares</div>
+          <div class="chart-card-subtitle">Top {{ run.malware_stats|length }} malware families observed</div>
+        </div>
+        <a href="{% url 'malware_list' %}" class="btn btn-ghost" style="padding:0.3rem 0.8rem; font-size:0.75rem; border-color:rgba(167,139,250,0.3);" onclick="event.stopPropagation();">
+          View All →
+        </a>
+      </div>
+      {% if run.malware_stats %}
+        <div class="chart-container" style="height:280px;">
+          <canvas id="malware-chart" aria-label="Malware families pie chart" role="img"></canvas>
+          <div class="chart-center-label">
+            <div class="chart-center-value">{{ run.unique_malwares }}</div>
+            <div class="chart-center-text">Families</div>
+          </div>
+        </div>
+        <div class="chart-legend" id="malware-legend" aria-label="Malware legend"></div>
+
+        <!-- Recent Malware Summary -->
+       
+      {% else %}
+        <div class="no-data-state"><div class="icon" aria-hidden="true"></div><p>No malware data available</p></div>
+      {% endif %}
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title"> Most Attacked IPs</div>
+        <div class="chart-card-subtitle">Top {{ run.ip_stats|length }} victim IP addresses by event count</div>
+      </div>
+      {% if run.ip_stats %}
+        <div class="chart-container" style="height:280px;">
+          <canvas id="ip-chart" aria-label="Most attacked IPs pie chart" role="img"></canvas>
+          <div class="chart-center-label">
+            <div class="chart-center-value">{{ run.unique_ips }}</div>
+            <div class="chart-center-text">IPs</div>
+          </div>
+        </div>
+        <div class="chart-legend" id="ip-legend" aria-label="IP legend"></div>
+      {% else %}
+        <div class="no-data-state"><div class="icon" aria-hidden="true"></div><p>No IP data available</p></div>
+      {% endif %}
+    </div>
+
+  </div>
+
+  {% if run.malware_asn_stats %}
+  <div class="trends-section" style="margin-top: 3rem;">
+    <h2 style="color: #f8fafc; font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">
+      <span aria-hidden="true" style="color: #a78bfa;">🎯</span> Threat Targeting
+    </h2>
+    <div class="chart-card" style="width: 100%;">
+      <div class="chart-card-header">
+        <div class="chart-card-title">Malware vs. ASN targeting distribution</div>
+        <div class="chart-card-subtitle">Bars show total malware volume, color-coded by the ASNs they attacked. Hover for exact numbers.</div>
+      </div>
+      <div class="chart-container" style="height:400px; padding: 1rem 0; max-width: none;">
+        <canvas id="targeting-bubble-chart" aria-label="Threat Targeting Bubble Chart" role="img"></canvas>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="download-section">
+    <div class="download-info">
+      <h3> Download Analysis Results</h3>
+      <p>Includes per-ASN CSVs and combined summary CSV.</p>
+    </div>
+    <div class="download-actions">
+      {% if run.output_dir %}
+        <a href="{% url 'download_results' run.pk %}" class="btn btn-download" id="download-btn">⬇ Download ZIP</a>
+      {% else %}
+        <span class="btn btn-ghost" style="cursor:default;opacity:0.5;">No results file</span>
+      {% endif %}
+      <a href="/intel/asns/" class="btn btn-ghost"> View ASNs</a>
+      <a href="/intel/advisories/" class="btn btn-ghost"> View Advisories</a>
+      <a href="/" class="btn btn-ghost">New Analysis</a>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const asnLabels     = {{ asn_labels|safe }};
+  const rawAsnLabels = {{ raw_asn_labels|safe|default:"[]" }};
+  const asnValues     = {{ asn_values|safe }};
+  const malwareLabels = {{ malware_labels|safe }};
+  const malwareValues = {{ malware_values|safe }};
+  const ipLabels      = {{ ip_labels|safe }};
+  const ipValues      = {{ ip_values|safe }};
+  
+  const malwareAsnStats = {{ malware_asn_stats|default:"{}"|safe }};
+
+  const PALETTES = {
+    emerald: ['#10d97a','#0ea862','#22d3ee','#38bdf8','#818cf8','#a78bfa','#c084fc','#e879f9','#fb923c','#facc15'],
+    violet:  ['#a78bfa','#818cf8','#60a5fa','#34d399','#10d97a','#22d3ee','#f472b6','#fb923c','#facc15','#c084fc'],
+    rose:    ['#f43f5e','#fb923c','#fbbf24','#a3e635','#34d399','#22d3ee','#60a5fa','#818cf8','#c084fc','#e879f9'],
+  };
+
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+
+  function buildDoughnut(canvasId, labels, values, palette) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return null;
+    const colors   = PALETTES[palette] || PALETTES.emerald;
+    const bgColors = labels.map((_, i) => colors[i % colors.length]);
+    const totalVal = values.reduce((a, b) => a + b, 0);
+    return new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: bgColors, borderColor: 'rgba(8,9,13,0.8)', borderWidth: 3, hoverOffset: 10, hoverBorderColor: '#fff' }] },
+      options: {
+        cutout: '68%', responsive: true, maintainAspectRatio: true,
+        animation: { animateRotate: true, animateScale: false, duration: 900, easing: 'easeOutQuart' },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(15,17,26,0.95)', borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1, padding: 12,
+            titleFont: { size: 12, weight: '700' }, bodyFont: { size: 12 },
+            callbacks: {
+              label: function(ctx) {
+                const pct = totalVal > 0 ? ((ctx.parsed / totalVal) * 100).toFixed(1) : '0.0';
+                return ` ${ctx.parsed.toLocaleString()} events (${pct}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function buildLegend(containerId, labels, values, palette) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const colors = PALETTES[palette] || PALETTES.emerald;
+    container.innerHTML = '';
+    labels.forEach((label, i) => {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `
+        <span class="legend-dot" style="background:${colors[i % colors.length]};"></span>
+        <span class="legend-label" title="${escHtml(label)}">${escHtml(label) || '(unknown)'}</span>
+        <span class="legend-value">${values[i].toLocaleString()}</span>
+      `;
+      container.appendChild(item);
+    });
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function animateCounter(el, target, duration = 1200) {
+    if (!el) return;
+    const step = target / (duration / 16);
+    let current = 0;
+    const tick = () => {
+      current = Math.min(current + step, target);
+      el.textContent = Math.round(current).toLocaleString();
+      if (current < target) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    animateCounter(document.getElementById('stat-total'),       parseInt("{{ run.total_rows }}")        || 0);
+    animateCounter(document.getElementById('stat-new-events'),   parseInt("{{ new_events_count }}")      || 0);
+    animateCounter(document.getElementById('stat-asns'),         parseInt("{{ run.unique_asns }}")       || 0);
+    animateCounter(document.getElementById('stat-malwares'),     parseInt("{{ run.unique_malwares }}")   || 0);
+    animateCounter(document.getElementById('stat-ips'),          parseInt("{{ run.unique_ips }}")        || 0);
+
+    if (asnLabels.length)     { buildDoughnut('asn-chart',     asnLabels,     asnValues,     'emerald'); buildLegend('asn-legend',     asnLabels,     asnValues,     'emerald'); }
+    if (malwareLabels.length) { buildDoughnut('malware-chart', malwareLabels, malwareValues, 'violet');  buildLegend('malware-legend', malwareLabels, malwareValues, 'violet');  }
+    if (ipLabels.length)      { buildDoughnut('ip-chart',      ipLabels,      ipValues,      'rose');    buildLegend('ip-legend',      ipLabels,      ipValues,      'rose');    }
+
+    // Color server-rendered ASN legend dots (advisory links) with emerald palette
+    document.querySelectorAll('.asn-dot').forEach(dot => {
+      const idx = parseInt(dot.dataset.index, 10);
+      dot.style.background = PALETTES.emerald[idx % PALETTES.emerald.length];
+    });
+
+    const targetingCtx = document.getElementById('targeting-bubble-chart');
+    if (targetingCtx && Object.keys(malwareAsnStats).length > 0) {
+      const malwares = Object.keys(malwareAsnStats);
+      const asnsSet = new Set();
+      
+      malwares.forEach(mw => {
+        Object.entries(malwareAsnStats[mw]).forEach(([asn, count]) => {
+          asnsSet.add(asn);
+        });
+      });
+      
+      const asns = Array.from(asnsSet);
+      
+      // Map colors so they match the ASN pie chart exactly
+      const asnColorMap = {};
+      rawAsnLabels.forEach((label, i) => {
+        asnColorMap[label] = PALETTES.emerald[i % PALETTES.emerald.length];
+      });
+      
+      let fallbackIndex = 0;
+      
+      const datasets = asns.map((asn) => {
+        const data = malwares.map(mw => {
+           return malwareAsnStats[mw][asn] || 0;
+        });
+        
+        let color = asnColorMap[asn];
+        if (!color) {
+           color = PALETTES.emerald[fallbackIndex % PALETTES.emerald.length];
+           fallbackIndex++;
+        }
+        
+        // Map raw ASN back to organization name for beautiful tooltips/legend
+        let orgName = asn;
+        const asnIdx = rawAsnLabels.indexOf(asn);
+        if (asnIdx !== -1) {
+            orgName = asnLabels[asnIdx];
+        } else {
+            const asnIdx2 = rawAsnLabels.indexOf(asn.replace(/^AS/, ''));
+            if (asnIdx2 !== -1) {
+                orgName = asnLabels[asnIdx2];
+            }
+        }
+        
+        return {
+          label: orgName,
+          data: data,
+          backgroundColor: color,
+          borderWidth: 0,
+          borderRadius: 2
+        };
+      });
+
+      new Chart(targetingCtx, {
+        type: 'bar',
+        data: {
+          labels: malwares,
+          datasets: datasets
+        },
+        options: {
+          indexAxis: 'y', // Makes it horizontal
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { 
+              display: true, 
+              position: 'right',
+              labels: { color: '#94a3b8', boxWidth: 12 }
+            },
+            tooltip: {
+              mode: 'nearest',
+              intersect: false,
+              backgroundColor: 'rgba(15,17,26,0.95)',
+              titleColor: '#fff',
+              bodyColor: '#cbd5e1',
+              callbacks: {
+                label: function(context) {
+                  if (context.raw === 0) return null;
+                  return `${context.dataset.label}: ${context.raw.toLocaleString()} events`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: true,
+              title: { display: true, text: 'Total Event Volume', color: '#cbd5e1', font: {size: 13, weight: 'bold'}, padding: {top: 10} },
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#94a3b8' }
+            },
+            y: {
+              stacked: true,
+              title: { display: true, text: 'Malware Family', color: '#cbd5e1', font: {size: 13, weight: 'bold'}, padding: {bottom: 10} },
+              grid: { display: false },
+              ticks: { color: '#94a3b8' }
+            }
+          }
+        }
+      });
+    }
+  });
+})();
+</script>
+{% endblock %}

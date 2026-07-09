@@ -1,0 +1,116 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}Advisories — CERT-BUND Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto;">
+  <div class="dashboard-header" style="margin-bottom:1rem;">
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+      {% if dashboard_run_id %}
+        <a href="{% url 'dashboard' dashboard_run_id %}" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+          ⬅ Back
+        </a>
+      {% else %}
+        <a href="/" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+          ⬅ Back
+        </a>
+      {% endif %}
+    </div>
+    <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">📢 Advisories</h1>
+  </div>
+
+  {% if messages %}
+  <div style="margin-bottom:1rem;">
+    {% for message in messages %}
+    <div style="padding:1rem; background:rgba(16,217,122,0.1); border:1px solid rgba(16,217,122,0.3); border-radius:var(--radius-sm); color:var(--emerald);">
+      {{ message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Search / filter bar -->
+  <form method="get" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.5rem; margin-bottom:1.5rem; display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+    <div style="flex:1; min-width:180px;">
+      <label for="id_filter_asn" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; font-weight:600; color:var(--text-muted);">Filter by ASN</label>
+      <input id="id_filter_asn" type="text" name="asn" value="{{ filter_asn }}" placeholder="e.g. AS13335"
+             style="width:100%; padding:0.45rem 0.7rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;">
+    </div>
+    <div style="flex:1; min-width:180px;">
+      <label for="id_filter_malware" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; font-weight:600; color:var(--text-muted);">Filter by Malware</label>
+      <input id="id_filter_malware" type="text" name="malware" value="{{ filter_malware }}" placeholder="e.g. Emotet"
+             style="width:100%; padding:0.45rem 0.7rem; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;">
+    </div>
+    <div style="display:flex; gap:0.5rem; align-items:center; padding-bottom:0.05rem;">
+      <button type="submit" class="btn btn-primary" style="padding:0.45rem 1.2rem; font-size:0.9rem;">🔍 Filter</button>
+      {% if filter_asn or filter_malware %}
+      <a href="{% url 'threatintel:advisory-list' %}" class="btn btn-ghost" style="padding:0.45rem 1rem; font-size:0.9rem; border-color:rgba(255,255,255,0.15);">✕ Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden;">
+    <table style="width:100%; border-collapse:collapse; color:var(--text-primary); font-size:0.9rem;">
+      <thead style="background:rgba(0,0,0,0.3); border-bottom:1px solid var(--border);">
+        <tr>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Advisory #</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Date</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Organization</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Malware Families</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for advisory in advisories %}
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
+          <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' advisory.pk %}" style="color:var(--emerald); font-weight:500; text-decoration:none;">{{ advisory.advisory_number|default:"Draft" }}</a></td>
+          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ advisory.advisory_date|date:"M j, Y" }}</td>
+          <td style="padding:1rem;">{{ advisory.asn.get_display_name }}</td>
+          <td style="padding:1rem;">
+            {% if advisory.malware_list %}
+              <details style="cursor:pointer;">
+                <summary style="font-family:monospace; color:var(--cyan); list-style:none; display:flex; align-items:center; gap:0.4rem;">
+                  <span style="font-size:0.7rem; transition:transform 0.2s;">▶</span>
+                  {{ advisory.malware_list|length }} malware famil{{ advisory.malware_list|length|pluralize:"y,ies" }}
+                </summary>
+                <ul style="margin:0.5rem 0 0 0; padding:0 0 0 1rem; list-style:disc;">
+                  {% for mw in advisory.malware_list %}
+                  <li style="font-family:monospace; color:var(--cyan); font-size:0.85rem; padding:0.15rem 0;">{{ mw.malware_name }}</li>
+                  {% endfor %}
+                </ul>
+              </details>
+            {% else %}
+              <span style="color:var(--text-muted);">—</span>
+            {% endif %}
+          </td>
+          <td style="padding:1rem;">
+            {% if advisory.status == "sent" %}
+              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
+            {% else %}
+              <span style="background:rgba(255,255,255,0.05); color:var(--text-primary); font-weight:500; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.2);">Draft</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" style="padding:3rem; text-align:center; color:var(--text-muted);">
+            <div style="font-size:2rem; margin-bottom:1rem; opacity:0.5;">📭</div>
+            {% if filter_asn or filter_malware %}
+              No advisories match the current filters.
+            {% else %}
+              No advisories generated yet.
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  /* Rotate arrow indicator when details is open */
+  details[open] > summary > span:first-child {
+    transform: rotate(90deg);
+  }
+</style>
+{% endblock %}

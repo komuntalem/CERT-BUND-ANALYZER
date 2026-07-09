@@ -1,0 +1,87 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}ASN Details — CERT-BUND Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto;">
+  <div class="dashboard-header" style="margin-bottom:1rem;">
+    <!-- Back Button -->
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+      <a href="javascript:history.back()" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+        ⬅ Back
+      </a>
+    </div>
+    <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">🌐 ASN: {{ asn.asn_number }}</h1>
+  </div>
+
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:2rem; color:var(--text-primary);">
+    <h5 style="color:var(--emerald); margin-bottom:1rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:0.5rem;">Organization Details</h5>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+      <div><strong style="color:var(--text-primary);">Organization Name:</strong><br>{{ asn.organization_name|default:"Unknown" }}</div>
+      <div><strong style="color:var(--text-primary);">Country:</strong><br>{{ asn.country|default:"Unknown" }}</div>
+      <div><strong style="color:var(--text-primary);">First Seen:</strong><br>{{ asn.created_at|date:"Y-m-d H:i" }}</div>
+      <div><strong style="color:var(--text-primary);">Last Seen:</strong><br><span style="color:#ffffff;">{{ asn.last_seen|date:"Y-m-d H:i"|default:"-" }}</span></div>
+    </div>
+  </div>
+
+  <style>
+    /* Hide standard details marker across browsers */
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+    details[open] .arrow {
+      transform: rotate(90deg);
+    }
+  </style>
+
+  <h4 style="color:#fff; margin-bottom:1rem;">Associated Advisories</h4>
+  <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden;">
+    <table style="width:100%; border-collapse:collapse; color:var(--text-primary); font-size:0.9rem;">
+      <thead style="background:rgba(0,0,0,0.3); border-bottom:1px solid var(--border);">
+        <tr>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Advisory #</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Date</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Malware</th>
+          <th style="padding:1rem; text-align:left; font-weight:600; color:#fff;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if has_advisories %}
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05); transition:var(--transition);" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='transparent'">
+          <td style="padding:1rem;"><a href="{% url 'threatintel:advisory-detail' latest_advisory.pk %}" style="color:var(--emerald); text-decoration:none; font-weight:600;">{{ latest_advisory.advisory_number|default:"Draft" }}</a></td>
+          <td style="padding:1rem; color:var(--text-primary); font-weight:500;">{{ latest_advisory.advisory_date }}</td>
+          <td style="padding:1rem;">
+            <details style="cursor: pointer; outline: none; user-select: none;">
+              <summary style="color:var(--emerald); font-weight:600; list-style: none; display: flex; align-items: center; gap: 0.35rem;">
+                <span class="arrow" style="transition: transform 0.2s ease-in-out; display: inline-block; font-size: 0.75rem;">▶</span>
+                Detected Malware ({{ all_malware_families|length }})
+              </summary>
+              <ul style="margin: 0.5rem 0 0 1.25rem; padding: 0; list-style-type: disc; color: var(--text-primary);">
+                {% for mw in all_malware_families %}
+                  <li style="margin-bottom: 0.25rem;">{{ mw.malware_name }}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          </td>
+          <td style="padding:1rem;">
+            {% if latest_advisory.status == "sent" %}
+              <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
+            {% else %}
+              <span style="background:rgba(255,255,255,0.05); color:var(--text-primary); font-weight:500; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.2);">Draft</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" style="padding:3rem; text-align:center; color:var(--text-muted);">
+            No advisories generated yet.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

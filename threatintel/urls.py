@@ -1,0 +1,48 @@
+from django.urls import path
+
+from . import views
+
+app_name = "threatintel"
+
+urlpatterns = [
+    path("", views.UploadCSVView.as_view(), name="home"),
+    path("generate/", views.UploadCSVView.as_view(), name="generate-advisories"),
+    path(
+        "generate/<int:run_id>/",
+        views.generate_from_run,
+        name="generate-from-run",
+    ),
+    path("asns/", views.ASNListView.as_view(), name="asn-list"),
+    path("asns/<int:pk>/", views.ASNDetailView.as_view(), name="asn-detail"),
+    path("advisories/", views.AdvisoryListView.as_view(), name="advisory-list"),
+    path(
+        "advisories/<int:pk>/",
+        views.AdvisoryDetailView.as_view(),
+        name="advisory-detail",
+    ),
+    path(
+        "advisories/<int:pk>/download/",
+        views.download_advisory_docx,
+        name="download-advisory-docx",
+    ),
+    path(
+        "advisories/<int:pk>/download-email/",
+        views.download_email_docx,
+        name="download-email-docx",
+    ),
+    path(
+        "advisories/<int:pk>/save-html/",
+        views.save_advisory_html,
+        name="save-advisory-html",
+    ),
+    path(
+        "advisories/<int:pk>/regenerate-html/",
+        views.regenerate_advisory_html,
+        name="regenerate-advisory-html",
+    ),
+    path(
+        "advisories/<int:pk>/gmail/",
+        views.open_gmail_draft,
+        name="gmail-draft",
+    ),
+]

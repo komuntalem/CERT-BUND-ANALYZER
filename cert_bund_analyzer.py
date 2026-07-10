@@ -191,6 +191,35 @@ def bootstrap_db():
             print("[CERT-Bund] Adding column 'new_malwares' to 'analyzer_analysisrun'…")
             cursor.execute("ALTER TABLE analyzer_analysisrun ADD COLUMN new_malwares TEXT DEFAULT '[]'")
 
+    # Ensure threatintel advisory M2M and html_content exist (self-healing for fresh DBs)
+    with connection.cursor() as cursor:
+        all_tables = connection.introspection.table_names()
+
+        # M2M junction table for advisory <-> malware_families
+        if 'threatintel_advisory_malware_families' not in all_tables:
+            print("[CERT-Bund] Creating missing table 'threatintel_advisory_malware_families'…")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS threatintel_advisory_malware_families (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    advisory_id INTEGER NOT NULL REFERENCES threatintel_advisory(id) DEFERRABLE INITIALLY DEFERRED,
+                    malware_id  INTEGER NOT NULL REFERENCES threatintel_malware(id)  DEFERRABLE INITIALLY DEFERRED
+                )
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                threatintel_advisory_malware_families_advisory_id_malware_id
+                ON threatintel_advisory_malware_families (advisory_id, malware_id)
+            """)
+            print("[CERT-Bund] Table 'threatintel_advisory_malware_families' created.")
+
+        # html_content column on advisory table
+        cursor.execute("PRAGMA table_info(threatintel_advisory)")
+        adv_cols = {row[1] for row in cursor.fetchall()}
+        if 'html_content' not in adv_cols:
+            print("[CERT-Bund] Adding column 'html_content' to 'threatintel_advisory'…")
+            cursor.execute("ALTER TABLE threatintel_advisory ADD COLUMN html_content TEXT DEFAULT ''")
+
+
     try:
         if not User.objects.filter(username='admin').exists():
             User.objects.create_superuser(
@@ -229,7 +258,10 @@ def run_e2e_test():
     try:
         admin = User.objects.get(username='CERT-Bund Admin')
     except User.DoesNotExist:
-        admin = User.objects.create_superuser('admin', 'admin@certbund.local', 'admin123')
+        try:
+            admin = User.objects.get(username='admin')
+        except User.DoesNotExist:
+            admin = User.objects.create_superuser('admin', 'admin@certbund.local', 'admin123')
 
     client = Client()
     client.force_login(admin)

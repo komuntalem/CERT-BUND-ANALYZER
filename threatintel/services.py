@@ -10,7 +10,7 @@ Services:
     MalwareService      – Malware record management
     CSVImportService    – Full + minimal CSV parsing with fingerprint computation
     SeenCombosService   – Hybrid audit-log (seen_combos.txt) persistence
-    AdvisoryService     – Per-pair advisory generation with ADV-YYYY-NNNN numbering
+    AdvisoryService     – Per-pair advisory generation with UCC-CERT-NNN numbering
     DocumentService     – DOCX export for advisories and email drafts
 """
 
@@ -306,13 +306,29 @@ class SeenCombosService:
 
     @staticmethod
     def append_fingerprints(fingerprints: Iterable[str]) -> None:
-        """Append fingerprints to the audit log.  Always called — independent
-        of whether the fingerprint was a duplicate."""
+        """Append only new, unique fingerprints to the audit log that are not already present."""
         path = SeenCombosService._filepath()
-        with open(path, "a", encoding="utf-8") as f:
-            for fp in fingerprints:
-                f.write(fp + "\n")
-        log.info("Appended %d fingerprint(s) to %s.", len(list(fingerprints)), path)
+        existing = set()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    val = line.strip()
+                    if val:
+                        existing.add(val)
+
+        new_unique = []
+        for fp in fingerprints:
+            fp_clean = fp.strip()
+            if fp_clean and fp_clean not in existing and fp_clean not in new_unique:
+                new_unique.append(fp_clean)
+
+        if new_unique:
+            with open(path, "a", encoding="utf-8") as f:
+                for fp in new_unique:
+                    f.write(fp + "\n")
+            log.info("Appended %d new unique fingerprint(s) to %s.", len(new_unique), path)
+        else:
+            log.info("No new unique fingerprints to append to %s.", path)
 
     @staticmethod
     def load_all() -> list[str]:
@@ -402,16 +418,16 @@ class CSVImportService:
 class AdvisoryService:
     """Generate advisories and email drafts from processed CSV data.
 
-    Advisories are created per unique (ASN, Malware) pair per run — not per
-    individual row.  Advisory numbers follow the ``ADV-YYYY-NNNN`` scheme
-    with year-based sequential reset.
+    Advisories are created per unique ASN/Organisation per run — one advisory
+    per organisation regardless of how many malware families are detected.
+    Advisory numbers follow the ``UCC-CERT-NNN`` scheme.
     """
 
     @staticmethod
     def _next_advisory_number() -> str:
-        """Generate the next sequential advisory number for the current year."""
-        year = date.today().year
-        prefix = f"ADV-{year}-"
+        """Generate the next sequential advisory number following UCC-CERT-SA-YY-NNN format."""
+        year_short = date.today().year % 100
+        prefix = f"UCC-CERT-SA-{year_short:02d}-"
         last = (
             Advisory.objects.filter(advisory_number__startswith=prefix)
             .order_by("-advisory_number")
@@ -424,7 +440,357 @@ class AdvisoryService:
                 seq = 1
         else:
             seq = 1
-        return f"{prefix}{seq:04d}"
+        return f"{prefix}{seq:03d}"
+
+    @staticmethod
+    def format_issuance_date(d: date) -> str:
+        """Format a date like '11th June 2026'."""
+        day = d.day
+        if 11 <= day <= 13:
+            suffix = 'th'
+        else:
+            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+        month_name = d.strftime('%B')
+        year = d.year
+        return f"{day}{suffix} {month_name} {year}"
+
+    @staticmethod
+    def get_malware_info_ddg_first(malware_name: str) -> tuple[str, list[str]]:
+        """
+        Get malware description and recommendations, querying DuckDuckGo first with OpenRouter summarization/generation,
+        and falling back to the Malware module.
+        """
+        import os
+        import json
+        import re
+        import requests
+        from ddgs import DDGS
+        from malware_views.models import MalwareEntry
+
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        
+        # 1. Try DuckDuckGo primary path
+        snippets = []
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(f"{malware_name} malware", max_results=3))
+                for r in results:
+                    body = r.get("body", "")
+                    if body:
+                        snippets.append(body)
+        except Exception as e:
+            log.warning(f"DuckDuckGo search failed for {malware_name}: {e}")
+
+        # If search worked, try to get description and mitigation from DDG results using OpenRouter
+        if snippets and api_key:
+            context_text = " ".join(snippets)
+            prompt = f"""
+Analyze the following threat intelligence context about the malware family '{malware_name}':
+Context: {context_text}
+
+Task 1: Generate a concise description of '{malware_name}' explaining what the malware is, its primary purpose, and its main impact on affected systems.
+Constraints for Task 1:
+- Must be a single complete and meaningful sentence.
+- Must contain a minimum of 15 words and a maximum of 20 words.
+- Do NOT simply truncate or copy existing text; synthesize it.
+
+Task 2: Generate 3 realistic incident response recommended mitigation actions for '{malware_name}'.
+Constraints for Task 2:
+- Write each recommendation as a complete, professional, CERT-advisory style sentence.
+- Do NOT use short bullet fragments like "Scan systems" or "Change passwords". Under any circumstances, write long, well-composed, full sentences.
+- Example of acceptable recommendations:
+  * "Affected systems should be immediately isolated from the network to prevent further propagation or data exfiltration."
+  * "Organizations should perform a full endpoint scan using updated security tools to identify additional indicators of compromise."
+  * "Credentials used on affected systems should be reset and reviewed for unauthorized access activity."
+
+Respond with a JSON object in this exact format:
+{{
+  "description": "...",
+  "recommendations": [
+    "...",
+    "...",
+    "..."
+  ]
+}}
+"""
+            try:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:8000",
+                    "X-Title": "CERT-Bund Threat Intelligence Platform"
+                }
+                payload = {
+                    "model": "google/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                    "max_tokens": 500,
+                    "response_format": {"type": "json_object"}
+                }
+                res = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=8
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    result = json.loads(content)
+                    desc = result.get("description", "").strip()
+                    recs = [r.strip() for r in result.get("recommendations", []) if r.strip()]
+                    
+                    # Validate description constraints
+                    words = desc.split()
+                    if 15 <= len(words) <= 20 and recs:
+                        log.info(f"Successfully generated custom description and mitigation for {malware_name} from DDG via AI.")
+                        return desc, recs
+            except Exception as e:
+                log.warning(f"Failed to query/parse OpenRouter for DDG summary: {e}")
+
+        # 2. Fallback to Malware module database
+        db_desc = ""
+        db_recs = ""
+        try:
+            entry = MalwareEntry.objects.filter(name__iexact=malware_name).first()
+            if entry:
+                db_desc = entry.description or entry.executive_summary
+                db_recs = entry.recommendations or entry.remediation
+        except Exception as e:
+            log.warning(f"Error fetching fallback from MalwareEntry: {e}")
+
+        # If database records are available, try to summarize them using OpenRouter
+        if db_desc and api_key:
+            prompt = f"""
+Summarize the following malware description and recommendations for '{malware_name}'.
+Description: {db_desc}
+Recommendations: {db_recs}
+
+Task 1: Generate a concise description of '{malware_name}' explaining what the malware is, its primary purpose, and its main impact.
+Constraints for Task 1:
+- Must be a single complete and meaningful sentence.
+- Must contain a minimum of 15 words and a maximum of 20 words.
+- Do NOT simply truncate the existing text; write a proper summary.
+
+Task 2: Format the recommendations as realistic incident response mitigation actions.
+Constraints for Task 2:
+- Write each recommendation as a complete, professional, CERT-advisory style sentence.
+- Do NOT use short bullet fragments under any circumstances. Write long, well-composed, full sentences.
+- Example of acceptable recommendations:
+  * "Affected systems should be immediately isolated from the network to prevent further propagation or data exfiltration."
+  * "Organizations should perform a full endpoint scan using updated security tools to identify additional indicators of compromise."
+  * "Credentials used on affected systems should be reset and reviewed for unauthorized access activity."
+
+Respond with a JSON object in this exact format:
+{{
+  "description": "...",
+  "recommendations": [
+    "...",
+    "...",
+    "..."
+  ]
+}}
+"""
+            try:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:8000",
+                    "X-Title": "CERT-Bund Threat Intelligence Platform"
+                }
+                payload = {
+                    "model": "google/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                    "max_tokens": 500,
+                    "response_format": {"type": "json_object"}
+                }
+                res = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=8
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    result = json.loads(content)
+                    desc = result.get("description", "").strip()
+                    recs = [r.strip() for r in result.get("recommendations", []) if r.strip()]
+                    
+                    # Validate description constraints
+                    words = desc.split()
+                    if 15 <= len(words) <= 20 and recs:
+                        log.info(f"Successfully generated custom description and mitigation for {malware_name} from MalwareEntry fallback via AI.")
+                        return desc, recs
+            except Exception as e:
+                log.warning(f"Failed to query/parse OpenRouter for MalwareEntry summary fallback: {e}")
+
+        # 3. Local deterministic fallbacks & template synthesizers if OpenRouter is offline/402
+        REMEDIAS_MAP = {
+            "isolate affected systems": "Affected systems should be immediately isolated from the network to prevent further propagation or data exfiltration.",
+            "isolate affected systems immediately": "Affected systems should be immediately isolated from the network to prevent further propagation or data exfiltration.",
+            "block network indicators": "Organizations should block all identified network and host-based indicators of compromise at the perimeter firewalls and DNS level.",
+            "block identified network indicators": "Organizations should block all identified network and host-based indicators of compromise at the perimeter firewalls and DNS level.",
+            "conduct forensic investigation": "A comprehensive forensic investigation should be conducted on affected host systems to identify the entry vector and scope of compromise.",
+            "update security controls": "Organizations should update their security controls and host-based signatures, and implement enhanced monitoring for anomalous network activity.",
+            "update security controls and implement enhanced monitoring": "Organizations should update their security controls and host-based signatures, and implement enhanced monitoring for anomalous network activity.",
+            "change passwords": "Credentials used on affected systems should be reset and reviewed for unauthorized access activity.",
+            "scan systems": "Organizations should perform a full endpoint scan using updated security tools to identify additional indicators of compromise."
+        }
+
+        # Parse local list of recommendations from db_recs
+        recs_list = []
+        if db_recs:
+            for line in db_recs.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                line_clean = re.sub(r'^\d+[\.\s\-)]+', '', line).strip()
+                line_lower = line_clean.lower().rstrip('.')
+                if line_lower in REMEDIAS_MAP:
+                    recs_list.append(REMEDIAS_MAP[line_lower])
+                elif line_clean:
+                    # Formatting custom fallback recommendation as a full sentence
+                    sentence = line_clean[0].upper() + line_clean[1:]
+                    if not sentence.endswith('.'):
+                        sentence += '.'
+                    recs_list.append(sentence)
+
+        # Fallback to defaults if list is empty or too short
+        if len(recs_list) < 2:
+            recs_list = [
+                "Affected systems should be immediately isolated from the network to prevent further propagation or data exfiltration.",
+                "Organizations should perform a full endpoint scan using updated security tools to identify additional indicators of compromise.",
+                "Credentials used on affected systems should be reset and reviewed for unauthorized access activity."
+            ]
+
+        # Generate a grammatically correct description between 15-20 words based on db_desc
+        desc = ""
+        if db_desc:
+            text_lower = db_desc.lower()
+            purpose = "compromise systems and steal sensitive user information"
+            if "miner" in text_lower or "mining" in text_lower:
+                purpose = "perform unauthorized cryptocurrency mining and harvest user credentials"
+            elif "stealer" in text_lower or "theft" in text_lower:
+                purpose = "steal sensitive user information and harvest credentials from web browsers"
+            elif "trojan" in text_lower:
+                purpose = "establish remote access and deliver additional malicious payloads to host systems"
+            elif "botnet" in text_lower:
+                purpose = "enlist compromised host devices into a botnet for command and control activities"
+
+            desc = f"{malware_name} is a sophisticated malware family designed to {purpose}."
+            words = desc.split()
+            if not (15 <= len(words) <= 20):
+                desc = ""
+
+        if not desc:
+            desc = f"{malware_name} is an active threat vector designed to compromise host systems, steal sensitive data, and exploit network assets."
+
+        log.info(f"Using local static fallback configuration for {malware_name} (description length: {len(desc.split())} words).")
+        return desc, recs_list
+
+    @staticmethod
+    def build_advisory_html(advisory: Advisory) -> str:
+        """Generate structured HTML content for the advisory page/TinyMCE editor."""
+        date_str = AdvisoryService.format_issuance_date(advisory.advisory_date)
+        org_name = advisory.asn.get_display_name()
+        
+        from django.utils.html import strip_tags
+        from malware_views.models import MalwareEntry
+
+        # 1. Self-heal missing malware descriptions
+        for mw in advisory.malware_families.all():
+            if not mw.description:
+                desc, recs = AdvisoryService.get_malware_info_ddg_first(mw.malware_name)
+                mw.description = desc
+                mw.save(update_fields=["description"])
+
+        # 2. Self-heal missing recommended mitigation actions
+        if not advisory.recommended_mitigation:
+            combined_recs = []
+            for mw in advisory.malware_families.all():
+                desc, recs = AdvisoryService.get_malware_info_ddg_first(mw.malware_name)
+                for r in recs:
+                    r_clean = r.strip()
+                    if r_clean and r_clean not in combined_recs:
+                        combined_recs.append(r_clean)
+            if combined_recs:
+                advisory.recommended_mitigation = "\n".join(f"{i}. {r}" for i, r in enumerate(combined_recs, 1))
+                advisory.save(update_fields=["recommended_mitigation"])
+        
+        # 3. Construct malware table rows
+        malware_rows = ""
+        for mw in advisory.malware_families.all():
+            try:
+                entry = MalwareEntry.objects.filter(name__iexact=mw.malware_name).first()
+            except Exception:
+                entry = None
+            if entry:
+                risk = entry.risk or entry.get_severity_display() or mw.risk_level
+                imp = entry.impact
+            else:
+                risk = mw.risk_level
+                imp = "Potential compromise of affected systems."
+                
+            desc = strip_tags(mw.description or "No description available.").strip()
+            risk = strip_tags(risk or "Medium").strip()
+            imp = strip_tags(imp or "High").strip()
+            
+            malware_rows += f"""
+            <tr>
+                <td style="border: 1px solid #000000; padding: 6px; font-weight: bold;">{mw.malware_name}</td>
+                <td style="border: 1px solid #000000; padding: 6px;">{desc}</td>
+                <td style="border: 1px solid #000000; padding: 6px;">{risk}</td>
+                <td style="border: 1px solid #000000; padding: 6px;">{imp}</td>
+            </tr>
+            """
+            
+        mitigation_list = ""
+        mitigation = advisory.recommended_mitigation or ""
+        for line in mitigation.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r'^(\d+\.\s+)(.*)$', line)
+            if match:
+                num = match.group(1)
+                text = match.group(2)
+                mitigation_list += f'<li><strong>{num}</strong>{text}</li>'
+            else:
+                mitigation_list += f'<li>{line}</li>'
+                
+        html = f"""
+        <p>Dear {org_name} Team,</p>
+        <p><strong>Advisory Number:</strong> {advisory.advisory_number or "TBD"}<br>
+        <strong>Date of Issuance:</strong> {date_str}<br>
+        <strong>Identified Asset:</strong> List of identified IP addresses attached.</p>
+        <p>Please find attached details of IP addresses within your network that are associated with hosts most likely compromised by malware. These IP addresses should be treated as indicators of potentially affected systems and require immediate investigation, containment, and remediation.</p>
+        <p><strong>Description of the Identified Malware:</strong></p>
+        <table style="border-collapse: collapse; width: 100%; border: 1px solid #000000;" border="1">
+            <thead>
+                <tr style="background-color: #f2f2f2;">
+                    <th style="border: 1px solid #000000; padding: 6px; text-align: left;">MALWARE</th>
+                    <th style="border: 1px solid #000000; padding: 6px; text-align: left;">DESCRIPTION</th>
+                    <th style="border: 1px solid #000000; padding: 6px; text-align: left;">RISK</th>
+                    <th style="border: 1px solid #000000; padding: 6px; text-align: left;">IMPACT</th>
+                </tr>
+            </thead>
+            <tbody>
+                {malware_rows}
+            </tbody>
+        </table>
+        <p>&nbsp;</p>
+        <p><strong>Recommended Actions:</strong></p>
+        <ol style="list-style-type: decimal; margin-left: 20px;">
+            {mitigation_list}
+        </ol>
+        <p>&nbsp;</p>
+        <p>You are required to submit an initial status update within 48 hours from receipt of this advisory via the feedback form, below.</p>
+        <p><strong>UCC-CERT CYBERSECURITY ADVISORY FEEDBACK FORM</strong> – <a href="https://forms.office.com/pages/responsepage.aspx?id=Xs3_98BEhkaEUnjqV0Mt51BLmTH0Iw5ApxjklnxERGdUOFRFTkYzQ0dTTTJFSUhaUVY2VUVVRlc5My4u&amp;route=shorturl" target="_blank" rel="noopener">Fill out form</a></p>
+        <p>Kind regards,</p>
+        """
+        return html
 
     @staticmethod
     def build_email_body(advisory: Advisory) -> str:  # noqa: ARG004  (advisory kept for API compat)
@@ -457,7 +823,7 @@ class AdvisoryService:
                 a.  Compute fingerprint
                 b.  Check AttackEvent table for dedup
                 c.  If new → create AttackEvent, group for advisory
-            4.  ALWAYS append ALL fingerprints to seen_combos.txt
+            4.  Append only NEW unique fingerprints to seen_combos.txt
             5.  Generate advisories per unique (ASN, Malware) pair
             6.  Generate email drafts for each advisory
             7.  Update AnalysisRun with final counts
@@ -511,64 +877,88 @@ class AdvisoryService:
                     )
                     new_event_count += 1
 
-                    # Group by (ASN, Malware) for advisory generation
-                    pair_key = (asn.pk, malware.pk)
-                    if pair_key not in new_events_by_pair:
-                        new_events_by_pair[pair_key] = {
+                    # Group by ASN for org-level advisory generation
+                    asn_key = asn.pk
+                    if asn_key not in new_events_by_pair:
+                        new_events_by_pair[asn_key] = {
                             "asn": asn,
-                            "malware": malware,
+                            "malware_set": set(),
                             "count": 0,
                         }
-                    new_events_by_pair[pair_key]["count"] += 1
+                    new_events_by_pair[asn_key]["malware_set"].add(malware)
+                    new_events_by_pair[asn_key]["count"] += 1
 
             # -- Phase 4: Audit log (always, independent of dedup) ----------
             SeenCombosService.append_fingerprints(all_fingerprints)
 
-            # -- Phase 5+6: Generate advisories + email drafts ---------------
+            # -- Phase 5+6: Generate/update org-level advisories + email drafts
             advisory_count = 0
             with transaction.atomic():
-                for pair_data in new_events_by_pair.values():
-                    asn = pair_data["asn"]
-                    malware = pair_data["malware"]
-                    event_count = pair_data["count"]
+                for asn_data in new_events_by_pair.values():
+                    asn = asn_data["asn"]
+                    malware_set = asn_data["malware_set"]
+                    event_count = asn_data["count"]
 
-                    advisory_number = AdvisoryService._next_advisory_number()
-
-                    summary = (
-                        f"Detected {event_count} unique attack event(s) involving "
-                        f"malware '{malware.malware_name}' targeting network assets "
-                        f"associated with {asn.get_display_name()} ({asn.asn_number})."
-                    )
-                    mitigation = (
-                        "1. Isolate affected systems immediately.\n"
-                        "2. Block all identified malicious IP addresses and domains.\n"
-                        "3. Update antivirus signatures and scan all endpoints.\n"
-                        "4. Review firewall and IDS/IPS rules.\n"
-                        "5. Escalate to security operations for further investigation.\n"
-                        "6. Preserve forensic evidence for incident response."
+                    malware_names = ", ".join(
+                        sorted(m.malware_name for m in malware_set)
                     )
 
-                    advisory = Advisory.objects.create(
-                        advisory_number=advisory_number,
-                        advisory_date=date.today(),
-                        asn=asn,
-                        malware=malware,
-                        summary=summary,
-                        recommended_mitigation=mitigation,
-                        content=f"{summary}\n\n{mitigation}",
-                        status="draft",
-                        source_run=run,
-                    )
+                    # Upsert: one advisory per ASN per run
+                    existing = Advisory.objects.filter(
+                        asn=asn, source_run=run
+                    ).first()
 
-                    EmailDraft.objects.create(
+                    if existing:
+                        # Update existing advisory to add newly detected malware
+                        existing.malware_families.add(*malware_set)
+                        malware_names = ", ".join(
+                            sorted(
+                                m.malware_name
+                                for m in existing.malware_families.all()
+                            )
+                        )
+                        existing.summary = (
+                            f"Detected {event_count} unique attack event(s) involving "
+                            f"malware: {malware_names} — "
+                            f"{asn.get_display_name()} ({asn.asn_number})."
+                        )
+                        existing.recommended_mitigation = "" # Reset to regenerate mitigations with new malware family
+                        existing.content = AdvisoryService.build_advisory_html(existing)
+                        existing.save(update_fields=["summary", "recommended_mitigation", "content"])
+                        advisory = existing
+                    else:
+                        advisory_number = AdvisoryService._next_advisory_number()
+                        summary = (
+                            f"Detected {event_count} unique attack event(s) involving "
+                            f"malware: {malware_names} — "
+                            f"{asn.get_display_name()} ({asn.asn_number})."
+                        )
+                        advisory = Advisory.objects.create(
+                            advisory_number=advisory_number,
+                            advisory_date=date.today(),
+                            asn=asn,
+                            summary=summary,
+                            recommended_mitigation="",
+                            content="",
+                            status="draft",
+                            source_run=run,
+                        )
+                        advisory.malware_families.set(malware_set)
+                        advisory.content = AdvisoryService.build_advisory_html(advisory)
+                        advisory.save(update_fields=["content"])
+                        advisory_count += 1
+
+                    # Upsert email draft (one per org advisory)
+                    EmailDraft.objects.update_or_create(
                         advisory=advisory,
-                        subject=(
-                            f"Cybersecurity Advisory Notification – "
-                            f"{asn.get_display_name()}"
-                        ),
-                        body=AdvisoryService.build_email_body(advisory),
+                        defaults={
+                            "subject": (
+                                f"Cybersecurity Advisory Notification – "
+                                f"{asn.get_display_name()}"
+                            ),
+                            "body": AdvisoryService.build_email_body(advisory),
+                        },
                     )
-                    advisory_count += 1
 
             # -- Phase 7: Finalize run --------------------------------------
             run.new_event_count = new_event_count
@@ -615,60 +1005,39 @@ class DocumentService:
 
     @staticmethod
     def generate_advisory_docx(advisory: Advisory) -> str:
-        """Generate a professionally formatted advisory DOCX document."""
+        """Generate a professionally formatted advisory DOCX document from HTML content."""
+        # Ensure HTML content is populated
+        if not advisory.content or "<table" not in advisory.content:
+            advisory.content = AdvisoryService.build_advisory_html(advisory)
+            advisory.save(update_fields=["content"])
+
         doc = Document()
-
-        # -- Title --
-        title = doc.add_heading("Cybersecurity Advisory", level=0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        subtitle = doc.add_heading(
-            advisory.advisory_number or "Draft Advisory", level=1
-        )
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        doc.add_paragraph("")  # spacer
-
-        # -- Metadata table --
-        table = doc.add_table(rows=6, cols=2)
-        table.style = "Table Grid"
-
-        metadata = [
-            ("Advisory Number", advisory.advisory_number or "TBD"),
-            ("Date", str(advisory.advisory_date)),
-            ("Organization", advisory.asn.get_display_name()),
-            ("ASN", advisory.asn.asn_number),
-            ("Malware", advisory.malware.malware_name),
-            ("Risk Level", advisory.malware.risk_level),
-        ]
-        for i, (label, value) in enumerate(metadata):
-            row = table.rows[i]
-            row.cells[0].text = label
-            row.cells[1].text = value
-            # Bold the label column
-            for paragraph in row.cells[0].paragraphs:
-                for run in paragraph.runs:
-                    run.bold = True
-
-        doc.add_paragraph("")  # spacer
-
-        # -- Summary --
-        doc.add_heading("Summary", level=1)
-        doc.add_paragraph(advisory.summary or advisory.content or "No summary available.")
-
-        # -- Recommended Mitigation --
-        doc.add_heading("Recommended Mitigation", level=1)
-        mitigation = advisory.recommended_mitigation or "No specific mitigation provided."
-        for line in mitigation.split("\n"):
-            line = line.strip()
-            if line:
-                doc.add_paragraph(line, style="List Bullet")
-
-        # -- Save --
+        
+        # Set margins to 1 inch
+        for section in doc.sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
+            
+        # Configure Normal style default font to match the template (Bookman Old Style 12pt)
+        style = doc.styles['Normal']
+        style.font.name = 'Bookman Old Style'
+        style.font.size = Pt(12)
+        style.paragraph_format.line_spacing = 1.15
+        style.paragraph_format.space_after = Pt(6)
+        style.paragraph_format.space_before = Pt(0)
+        
+        # Convert HTML to Word using HtmlToDocx
+        from htmldocx import HtmlToDocx
+        html_parser = HtmlToDocx()
+        html_parser.add_html_to_document(advisory.content, doc)
+        
+        # Save to media/advisories/
         outdir = DocumentService._media_dir("advisories")
         path = os.path.join(outdir, f"advisory_{advisory.pk}.docx")
         doc.save(path)
-        log.info("Advisory DOCX generated: %s", path)
+        log.info("Advisory DOCX generated from HTML content: %s", path)
         return path
 
     @staticmethod

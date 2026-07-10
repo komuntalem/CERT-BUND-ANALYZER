@@ -17,18 +17,12 @@ class AdvisoryForm(forms.ModelForm):
         fields = [
             "advisory_number",
             "advisory_date",
-            "summary",
-            "recommended_mitigation",
             "content",
         ]
         widgets = {
             "advisory_number": forms.TextInput(attrs={"class": "form-control"}),
             "advisory_date": forms.DateInput(
                 attrs={"type": "date", "class": "form-control"}
-            ),
-            "summary": forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
-            "recommended_mitigation": forms.Textarea(
-                attrs={"rows": 6, "class": "form-control"}
             ),
             "content": forms.Textarea(attrs={"rows": 8, "class": "form-control"}),
         }

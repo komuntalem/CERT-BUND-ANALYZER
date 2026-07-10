@@ -111,6 +111,44 @@ class ASNDetailView(DetailView):
     template_name = "threatintel/asn_detail.html"
     context_object_name = "asn"
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        asn = self.object
+        
+        # Get the latest run ID
+        latest_run = AnalysisRun.objects.order_by("-uploaded_at").first()
+        
+        # Get all advisories associated with this ASN in the latest run
+        if latest_run:
+            advisories = list(asn.advisories.filter(source_run=latest_run).prefetch_related("malware_families").order_by("-advisory_date", "-id"))
+        else:
+            advisories = list(asn.advisories.prefetch_related("malware_families").order_by("-advisory_date", "-id"))
+        
+        if advisories:
+            latest_advisory = advisories[0]
+            
+            # Since we filter by the current run, malware families are exactly the ones from this run's advisory
+            all_malware_families = list(latest_advisory.malware_families.all())
+            
+            context["latest_advisory"] = latest_advisory
+            context["all_malware_families"] = all_malware_families
+            context["has_advisories"] = True
+        else:
+            context["has_advisories"] = False
+            context["all_malware_families"] = []
+            
+        # Find the latest analyzer run ID for the back button
+        try:
+            from analyzer.models import AnalysisRun as AnalyzerRun
+            latest_analyzer_run = AnalyzerRun.objects.order_by('-created_at').first()
+            if latest_analyzer_run:
+                context["dashboard_run_id"] = latest_analyzer_run.pk
+        except Exception:
+            pass
+
+        return context
+
+
 
 class AdvisoryListView(ListView):
     model = Advisory
@@ -118,19 +156,38 @@ class AdvisoryListView(ListView):
     context_object_name = "advisories"
 
     def get_queryset(self):
-        qs = Advisory.objects.select_related("asn", "malware").all()
+        qs = Advisory.objects.select_related("asn").prefetch_related(
+            "malware_families"
+        ).order_by("-advisory_date", "-id")
+
         asn_filter = self.request.GET.get("asn", "").strip()
         malware_filter = self.request.GET.get("malware", "").strip()
         if asn_filter:
             qs = qs.filter(asn__asn_number__icontains=asn_filter)
         if malware_filter:
-            qs = qs.filter(malware__malware_name__icontains=malware_filter)
+            qs = qs.filter(
+                malware_families__malware_name__icontains=malware_filter
+            ).distinct()
         return qs
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["filter_asn"] = self.request.GET.get("asn", "")
         ctx["filter_malware"] = self.request.GET.get("malware", "")
+
+        # Annotate each advisory with its malware list for the template
+        for adv in ctx["advisories"]:
+            adv.malware_list = list(adv.malware_families.all())
+            
+        # Find the latest analyzer run ID for the back button
+        try:
+            from analyzer.models import AnalysisRun as AnalyzerRun
+            latest_analyzer_run = AnalyzerRun.objects.order_by('-created_at').first()
+            if latest_analyzer_run:
+                ctx["dashboard_run_id"] = latest_analyzer_run.pk
+        except Exception:
+            pass
+            
         return ctx
 
 
@@ -138,17 +195,37 @@ class AdvisoryDetailView(View):
     template_name = "threatintel/advisory_detail.html"
 
     def get(self, request, pk):
-        advisory = get_object_or_404(Advisory, pk=pk)
+        advisory = get_object_or_404(
+            Advisory.objects.select_related("asn").prefetch_related(
+                "malware_families"
+            ),
+            pk=pk,
+        )
+
+
+        if not advisory.content or "<table" not in advisory.content:
+            advisory.content = AdvisoryService.build_advisory_html(advisory)
+            advisory.save(update_fields=["content"])
+
         form = AdvisoryForm(instance=advisory)
 
-        # Safely access the OneToOne — avoid RelatedObjectDoesNotExist
-        email_draft = getattr(advisory, "email_draft", None)
         try:
             email_draft = advisory.email_draft
-        except Advisory.email_draft.RelatedObjectDoesNotExist:
+        except EmailDraft.DoesNotExist:
             email_draft = None
 
-        email_form = EmailDraftForm(instance=email_draft) if email_draft else None
+        # Resolve dashboard back-link URL
+        dashboard_run_id = None
+        if advisory.source_run:
+            dashboard_run_id = advisory.source_run.pk
+        else:
+            try:
+                from analyzer.models import AnalysisRun as AnalyzerRun
+                latest = AnalyzerRun.objects.order_by('-created_at').first()
+                if latest:
+                    dashboard_run_id = latest.pk
+            except Exception:
+                pass
 
         return render(
             request,
@@ -156,8 +233,10 @@ class AdvisoryDetailView(View):
             {
                 "advisory": advisory,
                 "form": form,
-                "email_form": email_form,
+                "advisory_html": advisory.html_content,
+                "malware_list": list(advisory.malware_families.all()),
                 "has_email_draft": email_draft is not None,
+                "dashboard_run_id": dashboard_run_id,
             },
         )
 
@@ -166,12 +245,15 @@ class AdvisoryDetailView(View):
         form = AdvisoryForm(request.POST, instance=advisory)
 
         if form.is_valid():
-            # Save advisory and force status to "draft"
             saved = form.save(commit=False)
             saved.status = "draft"
             saved.save()
 
-            # Auto-create or update the EmailDraft with the fixed template
+            # Save html_content if passed in the form (fallback/non-ajax POST)
+            if "html_content" in request.POST:
+                saved.html_content = request.POST["html_content"]
+                saved.save(update_fields=["html_content"])
+
             subject = (
                 f"Cybersecurity Advisory Notification – "
                 f"{advisory.asn.get_display_name()}"
@@ -185,11 +267,23 @@ class AdvisoryDetailView(View):
             messages.success(request, "Advisory saved and email draft updated.")
             return redirect("threatintel:advisory-detail", pk=advisory.pk)
 
-        # Re-fetch email draft for re-render on validation failure
         try:
             email_draft = advisory.email_draft
-        except Advisory.email_draft.RelatedObjectDoesNotExist:
+        except EmailDraft.DoesNotExist:
             email_draft = None
+
+        # Resolve dashboard back-link URL
+        dashboard_run_id = None
+        if advisory.source_run:
+            dashboard_run_id = advisory.source_run.pk
+        else:
+            try:
+                from analyzer.models import AnalysisRun as AnalyzerRun
+                latest = AnalyzerRun.objects.order_by('-created_at').first()
+                if latest:
+                    dashboard_run_id = latest.pk
+            except Exception:
+                pass
 
         return render(
             request,
@@ -197,7 +291,10 @@ class AdvisoryDetailView(View):
             {
                 "advisory": advisory,
                 "form": form,
+                "advisory_html": advisory.html_content,
+                "malware_list": list(advisory.malware_families.all()),
                 "has_email_draft": email_draft is not None,
+                "dashboard_run_id": dashboard_run_id,
             },
         )
 

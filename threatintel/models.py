@@ -111,12 +111,13 @@ class Advisory(models.Model):
     advisory_number = models.CharField(max_length=100, blank=True)
     advisory_date = models.DateField(default=timezone.now)
     asn = models.ForeignKey(ASN, on_delete=models.CASCADE, related_name="advisories")
-    malware = models.ForeignKey(
-        Malware, on_delete=models.CASCADE, related_name="advisories"
+    malware_families = models.ManyToManyField(
+        Malware, blank=True, related_name="advisories"
     )
     content = models.TextField(blank=True)
     summary = models.TextField(blank=True)
     recommended_mitigation = models.TextField(blank=True)
+    html_content = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     created_at = models.DateTimeField(default=timezone.now)
     source_run = models.ForeignKey(
@@ -150,3 +151,4 @@ class EmailDraft(models.Model):
 
     def __str__(self):
         return self.subject
+

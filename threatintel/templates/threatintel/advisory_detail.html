@@ -1,0 +1,156 @@
+{% extends 'analyzer/base.html' %}
+{% block title %}{{ advisory.advisory_number|default:"Advisory Detail" }} — CERT-BUND Analyzer{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout" style="padding:1.5rem; max-width:1400px; margin:0 auto; color:var(--text-primary);">
+
+<div class="card" style="margin-top: 1rem;">
+  <div class="card-body">
+  {% if messages %}
+  <div style="margin-bottom:1rem;">
+    {% for message in messages %}
+    <div style="padding:1rem; background:rgba(16,217,122,0.1); border:1px solid rgba(16,217,122,0.3); border-radius:var(--radius-sm); color:var(--emerald);">
+      {{ message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="dashboard-header" style="margin-bottom:1rem;">
+    <!-- Back Button -->
+    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+      <a href="{% url 'threatintel:advisory-list' %}" class="btn btn-ghost" style="padding:0.4rem 0.8rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; border-color:rgba(16,217,122,0.2);">
+        ⬅ Back
+      </a>
+    </div>
+    <h1 class="dashboard-title" style="font-size:1.6rem; margin:0;">📄 {{ advisory.advisory_number|default:"Draft Advisory" }}</h1>
+  </div>
+
+  <!-- Advisory metadata card -->
+  <div style="border-bottom:1px solid var(--border); padding-bottom:1.5rem; margin-bottom:2rem;">
+    <div style="display:grid; grid-template-columns:150px 1fr; gap:1rem; font-size:0.95rem;">
+      <div style="color:var(--text-primary); font-weight:600;">ASN</div>
+      <div><a href="{% url 'threatintel:asn-detail' advisory.asn.pk %}" style="color:var(--emerald); text-decoration:none;">{{ advisory.asn.asn_number }}</a> — {{ advisory.asn.get_display_name }}</div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Malware</div>
+      <div style="font-family:monospace; color:var(--cyan);">
+        {% for mw in malware_list %}{{ mw.malware_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+      </div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Risk Level</div>
+      <div>
+        {% for mw in malware_list %}
+          {% if mw.risk_level == "Critical" %}
+            <span style="background:rgba(225,29,72,0.15); color:#f43f5e; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(225,29,72,0.3);">CRITICAL</span>
+          {% elif mw.risk_level == "High" %}
+            <span style="background:rgba(217,119,6,0.15); color:#fbbf24; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(217,119,6,0.3);">HIGH</span>
+          {% elif mw.risk_level == "Medium" %}
+            <span style="background:rgba(37,99,235,0.15); color:#60a5fa; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(37,99,235,0.3);">MEDIUM</span>
+          {% else %}
+            <span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(148,163,184,0.3);">{{ mw.risk_level|upper }}</span>
+          {% endif %}
+        {% empty %}—{% endfor %}
+      </div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Status</div>
+      <div>
+        {% if advisory.status == "sent" %}
+          <span style="background:rgba(16,217,122,0.15); color:var(--emerald); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(16,217,122,0.3);">✓ Sent</span>
+        {% else %}
+          <span style="background:rgba(255,255,255,0.05); color:var(--text-muted); padding:0.2rem 0.6rem; border-radius:999px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.1);">Draft</span>
+        {% endif %}
+      </div>
+
+      <div style="color:var(--text-primary); font-weight:600;">Created</div>
+      <div>{{ advisory.created_at|date:"Y-m-d H:i" }}</div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--text-primary); margin-bottom:1rem; font-size:1.2rem;">Edit Advisory</h3>
+  <form method="post" style="border-bottom:1px solid var(--border); padding-bottom:1.5rem; margin-bottom:2rem;">
+    {% csrf_token %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1.5rem; margin-bottom:1.5rem;">
+      <div>
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Number</label>
+        {{ form.advisory_number }}
+      </div>
+      <div>
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Date</label>
+        {{ form.advisory_date }}
+      </div>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+        <label style="display:block; margin-bottom:0.5rem; font-weight:600; font-size:0.9rem; color:var(--text-muted);">Advisory Content (TinyMCE Editor)</label>
+        {{ form.content }}
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button class="btn btn-primary" type="submit">Save Advisory</button>
+        <a class="btn btn-ghost" href="{% url 'threatintel:download-advisory-docx' advisory.pk %}">⬇ Advisory .docx</a>
+        {% if has_email_draft %}
+            <a class="btn btn-ghost" style="border-color:rgba(16,217,122,0.3); color:var(--emerald);" href="{% url 'threatintel:gmail-draft' advisory.pk %}" target="_blank">✉ Open Gmail Draft</a>
+        {% endif %}
+    </div>
+  </form>
+
+
+
+  </div> <!-- End card-body -->
+</div> <!-- End card -->
+
+</div>
+
+<style>
+  /* Form styling for dark mode */
+  input[type="text"], input[type="date"], select, textarea {
+    width: 100%;
+    padding: 0.5rem;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+  }
+  input[type="text"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--emerald);
+  }
+</style>
+
+<!-- Include TinyMCE via cdnjs (Free, Open Source version, no API key required) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tinymce/6.8.2/tinymce.min.js" referrerpolicy="origin"></script>
+<script>
+  tinymce.init({
+    selector: '#id_content',
+    height: 800,
+    menubar: false,
+    plugins: [
+      'advlist', 'autolink', 'lists', 'link', 'image', 'charmap', 'preview',
+      'anchor', 'searchreplace', 'visualblocks', 'code', 'fullscreen',
+      'insertdatetime', 'media', 'table', 'help', 'wordcount'
+    ],
+    toolbar: 'undo redo | blocks | fontfamily fontsize | ' +
+      'bold italic forecolor | alignleft aligncenter ' +
+      'alignright alignjustify | bullist numlist outdent indent | ' +
+      'removeformat | help',
+    font_family_formats: 'Bookman Old Style=Bookman Old Style, Book Antiqua, Palatino Linotype, Georgia, serif; Andale Mono=andale mono,times; Arial=arial,helvetica,sans-serif; Arial Black=arial black,avant garde; Book Antiqua=book antiqua,palatino; Comic Sans MS=comic sans ms,sans-serif; Courier New=courier new,courier; Georgia=georgia,palatino; Helvetica=helvetica; Impact=impact,chicago; Symbol=webdings; Tahoma=tahoma,arial,helvetica,sans-serif; Terminal=terminal,monaco; Times New Roman=times new roman,times; Trebuchet MS=trebuchet ms,geneva; Verdana=verdana,geneva; Webdings=webdings; Wingdings=wingdings,zapf dingbats',
+    content_style: `
+      body { 
+        font-family: 'Bookman Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif; 
+        font-size: 12pt; 
+        line-height: 1.5; 
+        color: #000000; 
+        background: #ffffff; 
+        padding: 40px; 
+        margin: 0 auto;
+        text-align: justify;
+      }
+      p { margin: 0 0 12px 0; }
+      h1, h2, h3 { color: #000000; font-weight: bold; margin-bottom: 8px; }
+      h1 { font-size: 16pt; }
+      h2 { font-size: 14pt; margin-top: 18px; }
+      ul, ol { margin: 6px 0 10px 24px; padding: 0; }
+      li { margin: 3px 0; }
+      a { color: #0563C1; text-decoration: underline; }
+    `
+  });
+</script>
+{% endblock %}

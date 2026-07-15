@@ -48,6 +48,8 @@ import glob
 import logging
 import time
 import requests
+
+from analyzer.analysis_engine import fetch_asn_name_api, deduplicate_org_name
 from bs4 import BeautifulSoup
 from docx import Document
 from datetime import datetime
@@ -244,6 +246,24 @@ def analyze_csv(csv_file, seen_combos, seen_reports):
             if not clean["asn"]:
                 log.debug("Row %d skipped — missing ASN.", line_num)
                 continue
+
+            # Update ASN name using the imported functions
+            asn_str = clean["asn"]
+            parts = asn_str.split(' ', 1)
+            if len(parts) > 1:
+                operator = parts[1].strip()
+                operator = deduplicate_org_name(operator)
+                clean["asn"] = operator
+            else:
+                asn_num = asn_str.strip().upper()
+                if not asn_num.startswith('AS'):
+                    asn_num = 'AS' + asn_num
+                
+                fetched = fetch_asn_name_api(asn_num)
+                if fetched:
+                    clean["asn"] = fetched
+                else:
+                    clean["asn"] = asn_num
 
             fp = make_fingerprint(clean)
 

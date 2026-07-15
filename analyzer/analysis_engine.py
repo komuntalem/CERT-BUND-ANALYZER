@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import csv
+import socket
 import time
 import zipfile
 from collections import Counter, defaultdict
@@ -298,48 +299,100 @@ def create_results_zip(output_dir: str) -> str:
                 zf.write(full, arcname)
     return zip_path
 
-# ── BGPView ASN cache & circuit breaker ──────────────────────────────────────
+# ── Deduplication Helper ───────────────────────────────────────────────────────
+def deduplicate_org_name(name: str) -> str:
+    """If the API returns a duplicated string like 'A - A', return the cleaner 'A'."""
+    name = name.strip()
+    if '-' in name:
+        parts = [p.strip() for p in name.split('-', 1)]
+        if len(parts) == 2:
+            left_lower = parts[0].lower()
+            right_lower = parts[1].lower()
+            if left_lower in right_lower or right_lower in left_lower:
+                return parts[1] if len(parts[1]) > len(parts[0]) else parts[0]
+    return name
+
+# ── Multi-Tier ASN Cache & Circuit Breakers ───────────────────────────────────
 _asn_cache: dict[str, str] = {}
+_ripe_unavailable: bool = False
+_cymru_unavailable: bool = False
+_peeringdb_unavailable: bool = False
 _bgpview_unavailable: bool = False
 
 def fetch_asn_name_api(asn_num: str) -> str:
-    """Resolve an ASN number to an operator name via the BGPView API."""
-    global _bgpview_unavailable
+    """Resolve an ASN number using a prioritized multi-tier fallback mechanism."""
+    global _ripe_unavailable, _cymru_unavailable, _peeringdb_unavailable, _bgpview_unavailable
 
     num_only = asn_num.replace('AS', '')
     if not num_only.isdigit():
         return ""
 
     cache_key = f"AS{num_only}"
-
     if cache_key in _asn_cache:
         return _asn_cache[cache_key]
 
-    if _bgpview_unavailable:
-        log.debug("BGPView unavailable — skipping lookup for %s", cache_key)
-        _asn_cache[cache_key] = ""
-        return ""
-
-    resp = http_get_with_retry(f"https://api.bgpview.io/asn/{num_only}", headers=HEADERS)
-
-    if resp is None:
-        log.warning(
-            "BGPView unreachable — ASN lookups disabled for this session. "
-            "Check network connectivity or DNS resolution for 'api.bgpview.io'."
-        )
-        _bgpview_unavailable = True
-        _asn_cache[cache_key] = ""
-        return ""
-
     name = ""
-    try:
-        data = resp.json()
-        if data.get('status') == 'ok':
-            name = data['data'].get('name', '') or data['data'].get('description_short', '')
-    except Exception:
-        pass
 
-    _asn_cache[cache_key] = name
+    # Tier 1: RIPE Stat API
+    if not _ripe_unavailable:
+        resp = http_get_with_retry(f"https://stat.ripe.net/data/as-overview/data.json?resource=AS{num_only}", headers=HEADERS)
+        if resp is None:
+            log.warning("RIPE Stat API unreachable — disabled for this session.")
+            _ripe_unavailable = True
+        else:
+            try:
+                data = resp.json()
+                holder = data.get('data', {}).get('holder', '')
+                if holder:
+                    name = holder
+            except Exception:
+                pass
+
+    # Tier 2: Team Cymru WHOIS
+    if not name and not _cymru_unavailable:
+        try:
+            with socket.create_connection(('whois.cymru.com', 43), timeout=5) as s:
+                s.sendall(f"AS{num_only}\r\n".encode('utf-8'))
+                response = s.recv(4096).decode('utf-8')
+                lines = response.splitlines()
+                if len(lines) > 1 and lines[1].strip():
+                    name = lines[1].strip()
+        except Exception as e:
+            log.warning("Team Cymru WHOIS unreachable — disabled for this session. %s", e)
+            _cymru_unavailable = True
+
+    # Tier 3: PeeringDB API
+    if not name and not _peeringdb_unavailable:
+        resp = http_get_with_retry(f"https://peeringdb.com/api/net?asn={num_only}", headers=HEADERS)
+        if resp is None:
+            log.warning("PeeringDB unreachable — disabled for this session.")
+            _peeringdb_unavailable = True
+        else:
+            try:
+                data = resp.json()
+                if data.get('data') and len(data['data']) > 0:
+                    name = data['data'][0].get('name', '')
+            except Exception:
+                pass
+
+    # Tier 4: BGPView API
+    if not name and not _bgpview_unavailable:
+        resp = http_get_with_retry(f"https://api.bgpview.io/asn/{num_only}", headers=HEADERS)
+        if resp is None:
+            log.warning("BGPView unreachable — disabled for this session.")
+            _bgpview_unavailable = True
+        else:
+            try:
+                data = resp.json()
+                if data.get('status') == 'ok':
+                    name = data.get('data', {}).get('name', '') or data.get('data', {}).get('description_short', '')
+            except Exception:
+                pass
+
+    if name:
+        name = deduplicate_org_name(name)
+        _asn_cache[cache_key] = name
+
     return name
 
 # ── CSV parsing ───────────────────────────────────────────────────────────────
@@ -397,6 +450,7 @@ def parse_csv_file(
                     parts = asn_str.split(' ', 1)
                     if len(parts) > 1:
                         operator = parts[1].strip()
+                        operator = deduplicate_org_name(operator)
                         asn_num = parts[0].upper()
                         if asn_num not in db_asn_map:
                             db_asn_map[asn_num] = operator
@@ -415,6 +469,8 @@ def parse_csv_file(
                                 db_asn_map[asn_num] = fetched
                                 new_asns_discovered[asn_num] = fetched
                                 clean["asn"] = fetched
+                            else:
+                                clean["asn"] = asn_num
 
                 all_rows.append(clean)
 

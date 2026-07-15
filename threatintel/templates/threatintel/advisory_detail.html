@@ -87,7 +87,7 @@
         <button class="btn btn-primary" type="submit">Save Advisory</button>
         <a class="btn btn-ghost" href="{% url 'threatintel:download-advisory-docx' advisory.pk %}">⬇ Advisory .docx</a>
         {% if has_email_draft %}
-            <a class="btn btn-ghost" style="border-color:rgba(16,217,122,0.3); color:var(--emerald);" href="{% url 'threatintel:gmail-draft' advisory.pk %}" target="_blank">✉ Open Gmail Draft</a>
+            <a class="btn btn-ghost" style="border-color:rgba(16,217,122,0.3); color:var(--emerald);" href="{% url 'threatintel:outlook-draft' advisory.pk %}" target="_blank">✉ Open Outlook Draft</a>
         {% endif %}
     </div>
   </form>

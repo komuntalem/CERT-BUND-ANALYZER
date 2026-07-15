@@ -347,8 +347,8 @@ def download_email_docx(request, pk):
 # ---------------------------------------------------------------------------
 
 
-def open_gmail_draft(request, pk):
-    """Open Gmail compose with pre-populated subject and body.
+def open_outlook_draft(request, pk):
+    """Open Outlook compose with pre-populated subject, body, and recipient.
 
     Does NOT send automatically — the analyst enters recipients and reviews
     the content before sending.  Marks the advisory as "sent" upon opening.
@@ -362,11 +362,15 @@ def open_gmail_draft(request, pk):
 
     subject = quote(email_draft.subject)
     body = quote(email_draft.body)
-    gmail_url = f"https://mail.google.com/mail/?view=cm&fs=1&su={subject}&body={body}"
+    
+    outlook_url = f"https://outlook.office.com/mail/deeplink/compose?subject={subject}&body={body}"
+    if advisory.asn and advisory.asn.contact_email:
+        to = quote(advisory.asn.contact_email)
+        outlook_url += f"&to={to}"
 
-    # Transition advisory status: Draft → Sent
+    # Transition advisory status: Draft -> Sent
     if advisory.status != "sent":
         advisory.status = "sent"
         advisory.save(update_fields=["status"])
 
-    return HttpResponseRedirect(gmail_url)
+    return HttpResponseRedirect(outlook_url)

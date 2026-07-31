@@ -201,12 +201,16 @@ def collect_csv_files(input_path):
 
 def load_set(filepath):
     if not os.path.exists(filepath):
+        log.warning(f"Warning: '{filepath}' not found! Please create an empty file first if you wish to track this.")
         return set()
     with open(filepath, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
 def append_to_file(filepath, items):
     """Append new items to a persistence file without rewriting the whole thing."""
+    if not os.path.exists(filepath):
+        log.warning(f"Warning: '{filepath}' does not exist. Skipping append. Please create the file manually.")
+        return
     with open(filepath, "a", encoding="utf-8") as f:
         for item in sorted(items):
             f.write(item + "\n")

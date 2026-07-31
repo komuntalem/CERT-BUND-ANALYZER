@@ -62,14 +62,10 @@ def _seen_combos_path() -> str:
 
 
 def load_seen_combos() -> set:
-    """Load all previously-seen fingerprints from the baseline file.
-
-    Returns an empty set on first run (file absent) — every event is then
-    treated as new and the file is created after the run.
-    """
+    """Load all previously-seen fingerprints from the baseline file."""
     path = _seen_combos_path()
     if not os.path.exists(path):
-        log.info("seen_combos.txt not found — this run establishes the baseline.")
+        log.warning("seen_combos.txt not found! Please create an empty seen_combos.txt file to start tracking.")
         return set()
     with open(path, "r", encoding="utf-8") as f:
         combos = set(line.strip() for line in f if line.strip())
@@ -78,14 +74,15 @@ def load_seen_combos() -> set:
 
 
 def append_seen_combos(fingerprints: set) -> None:
-    """Append *only new* fingerprints to the baseline file.
-
-    Appending rather than rewriting keeps the operation fast even when
-    the file grows to millions of lines.
-    """
+    """Append *only new* fingerprints to the baseline file."""
     if not fingerprints:
         return
     path = _seen_combos_path()
+    
+    if not os.path.exists(path):
+        log.warning("Warning: seen_combos.txt does not exist. Skipping append. Please create the file manually.")
+        return
+
     with open(path, "a", encoding="utf-8") as f:
         for fp in sorted(fingerprints):
             f.write(fp + "\n")

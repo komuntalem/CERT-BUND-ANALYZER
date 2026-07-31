@@ -3,7 +3,7 @@ __pycache__/
 *$py.class
 *.log
 media/
-seen_combos.txt
+
 db.sqlite3
 .vscode/
 .env

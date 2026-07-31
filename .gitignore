@@ -4,6 +4,6 @@ __pycache__/
 *.log
 media/
 
-db.sqlite3
+
 .vscode/
 .env

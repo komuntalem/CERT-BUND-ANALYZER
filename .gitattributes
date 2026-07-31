@@ -1,1 +1,2 @@
 seen_combos.txt filter=git-crypt diff=git-crypt
+db.sqlite3 filter=git-crypt diff=git-crypt

@@ -13,7 +13,7 @@ This tool automates the ingestion, deduplication, analysis, and reporting of CER
 ### 1. Clone & Decrypt the Repository
 Because this repository stores sensitive historical fingerprints (`seen_combos.txt`) and a database (`db.sqlite3`), those files are encrypted using `git-crypt`.
 
-1. Install `git-crypt` for your operating system.
+1. Install [`git-crypt`](https://github.com/AGWA/git-crypt/releases) for your operating system.
 2. Clone the repository:
    ```bash
    git clone <repository_url>
@@ -22,7 +22,7 @@ Because this repository stores sensitive historical fingerprints (`seen_combos.t
 3. Securely obtain the decryption key (`seen_combos_secret.key`) from an authorized team member.
 4. Decrypt the repository:
    ```bash
-   git-crypt unlock /path/to/seen_combos_secret.key
+   /path/to/git-crypt unlock /path/to/seen_combos_secret.key
    ```
 *(After running this command, `seen_combos.txt` and `db.sqlite3` will be transformed into readable plain-text on your local machine).*
 

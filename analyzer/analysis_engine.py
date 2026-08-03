@@ -453,10 +453,13 @@ def parse_csv_file(
                             db_asn_map[asn_num] = operator
                             new_asns_discovered[asn_num] = operator
                         clean["asn"] = operator
+                        clean["_raw_asn"] = asn_num if asn_num.startswith('AS') else 'AS' + asn_num
                     else:
                         asn_num = asn_str.strip().upper()
                         if not asn_num.startswith('AS'):
                             asn_num = 'AS' + asn_num
+
+                        clean["_raw_asn"] = asn_num
 
                         if asn_num in db_asn_map:
                             clean["asn"] = db_asn_map[asn_num]
@@ -586,7 +589,15 @@ def run_analysis(
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
             writer.writeheader()
-            writer.writerows(rows)
+            
+            rows_for_csv = []
+            for r in rows:
+                r_copy = r.copy()
+                if "_raw_asn" in r_copy:
+                    r_copy["asn"] = r_copy.pop("_raw_asn")
+                rows_for_csv.append(r_copy)
+            
+            writer.writerows(rows_for_csv)
 
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
     combined_csv = os.path.join(output_dir, f"all_asns_{ts}.csv")
@@ -594,7 +605,13 @@ def run_analysis(
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
         writer.writeheader()
         for asn in sorted(rows_by_asn.keys()):
-            writer.writerows(rows_by_asn[asn])
+            rows_for_csv = []
+            for r in rows_by_asn[asn]:
+                r_copy = r.copy()
+                if "_raw_asn" in r_copy:
+                    r_copy["asn"] = r_copy.pop("_raw_asn")
+                rows_for_csv.append(r_copy)
+            writer.writerows(rows_for_csv)
 
     log.info("Combined CSV written: %s", combined_csv)
 

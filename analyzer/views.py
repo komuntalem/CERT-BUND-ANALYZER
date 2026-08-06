@@ -14,7 +14,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import KnownMalware, KnownASN, AnalysisRun
-from .analysis_engine import run_analysis, create_results_zip, _seen_combos_path
+from .analysis_engine import run_analysis, create_results_zip, _seen_combos_path, append_seen_combos
 
 log = logging.getLogger("cert_bund_web")
 
@@ -188,6 +188,15 @@ def analyze(request):
         log.error(f"Advisory auto-generation failed (non-fatal): {e}")
     # ── end advisory auto-generation ─────────────────────────────────────────
 
+    # ── Append new unique fingerprints to seen_combos.txt ────────────────────
+    # Done here (after DB commit) so a failed transaction never grows the file.
+    new_fps = stats.get('new_fingerprints', set())
+    if new_fps:
+        try:
+            append_seen_combos(new_fps)
+        except Exception as e:
+            log.error(f"Failed to append to seen_combos.txt (non-fatal): {e}")
+
     return redirect('dashboard', run_id=run.pk)
 
 
@@ -201,7 +210,7 @@ def dashboard(request, run_id):
 
     total_baseline_events = 0
     try:
-        with open(_seen_combos_path(), 'r', encoding='utf-8') as f:
+        with open(_seen_combos_path(), 'r', encoding='utf-8-sig') as f:
             total_baseline_events = sum(1 for line in f if line.strip())
     except Exception:
         pass

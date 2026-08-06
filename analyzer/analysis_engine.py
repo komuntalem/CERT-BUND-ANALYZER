@@ -67,26 +67,50 @@ def load_seen_combos() -> set:
     if not os.path.exists(path):
         log.warning("seen_combos.txt not found! Please create an empty seen_combos.txt file to start tracking.")
         return set()
-    with open(path, "r", encoding="utf-8") as f:
+    # utf-8-sig strips the BOM character that Excel/Windows sometimes writes
+    # at the start of the file, preventing the first fingerprint from failing
+    # to match during deduplication.
+    with open(path, "r", encoding="utf-8-sig") as f:
         combos = set(line.strip() for line in f if line.strip())
     log.info("Loaded %d existing fingerprints from seen_combos.txt.", len(combos))
     return combos
 
 
 def append_seen_combos(fingerprints: set) -> None:
-    """Append *only new* fingerprints to the baseline file."""
+    """Append only fingerprints not already present in the baseline file.
+
+    Re-reads the file immediately before writing so that concurrent runs or
+    a previously-written baseline never cause duplicate lines.
+    """
     if not fingerprints:
         return
     path = _seen_combos_path()
-    
+
     if not os.path.exists(path):
         log.warning("Warning: seen_combos.txt does not exist. Skipping append. Please create the file manually.")
         return
 
+    # Re-read baseline right before writing so we never introduce duplicates.
+    existing = load_seen_combos()
+    new_unique = sorted(fp for fp in fingerprints if fp and fp.strip() and fp.strip() not in existing)
+
+    if not new_unique:
+        log.info("No new unique fingerprints to append to seen_combos.txt.")
+        return
+
+    # Ensure file ends with a newline before appending.
+    needs_leading_newline = False
+    if os.path.getsize(path) > 0:
+        with open(path, "rb") as f:
+            f.seek(-1, os.SEEK_END)
+            needs_leading_newline = f.read(1) not in (b"\n", b"\r")
+
     with open(path, "a", encoding="utf-8") as f:
-        for fp in sorted(fingerprints):
+        if needs_leading_newline:
+            f.write("\n")
+        for fp in new_unique:
             f.write(fp + "\n")
-    log.info("Appended %d new fingerprint(s) to seen_combos.txt.", len(fingerprints))
+    log.info("Appended %d new unique fingerprint(s) to seen_combos.txt.", len(new_unique))
 
 
 # ── Row helpers ───────────────────────────────────────────────────────────────
@@ -536,8 +560,9 @@ def run_analysis(
         all_new_malware_discovered.update(new_mw)
         known_malware.update(new_mw)
 
-    # Persist only genuinely new fingerprints — no duplicates in the file.
-    append_seen_combos(all_new_fingerprints)
+    # NOTE: append_seen_combos is NOT called here.
+    # views.py calls it after the DB transaction completes successfully,
+    # so a failed DB write never causes seen_combos.txt to grow.
 
     if not all_rows:
         return {
@@ -621,18 +646,21 @@ def run_analysis(
 
 
     return {
-        "total_rows":       len(all_rows),
-        "duplicate_count":  total_historically_seen,
-        "unique_asns":      len(asn_counter),
-        "unique_malwares":  len(malware_counter),
-        "unique_ips":       len(ip_counter),
-        "asn_stats":        asn_stats,
-        "malware_stats":    malware_stats,
-        "ip_stats":         ip_stats,
+        "total_rows":        len(all_rows),
+        "duplicate_count":   total_historically_seen,
+        "unique_asns":       len(asn_counter),
+        "unique_malwares":   len(malware_counter),
+        "unique_ips":        len(ip_counter),
+        "asn_stats":         asn_stats,
+        "malware_stats":     malware_stats,
+        "ip_stats":          ip_stats,
         "malware_asn_stats": malware_asn_stats,
-        "output_dir":       output_dir,
-        "new_asns":         new_asns_discovered,
-        "new_malwares":     list(all_new_malware_discovered),
-        "all_rows":         all_rows,
-        "is_first_run":     is_first_run,
+        "output_dir":        output_dir,
+        "new_asns":          new_asns_discovered,
+        "new_malwares":      list(all_new_malware_discovered),
+        "all_rows":          all_rows,
+        "is_first_run":      is_first_run,
+        # Set of fingerprints that are genuinely new this run.
+        # views.py appends these to seen_combos.txt after DB commit succeeds.
+        "new_fingerprints":  all_new_fingerprints,
     }

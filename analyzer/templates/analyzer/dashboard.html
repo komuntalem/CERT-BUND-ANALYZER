@@ -260,7 +260,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    animateCounter(document.getElementById('stat-total'),       parseInt("{{ run.total_rows }}")        || 0);
+    animateCounter(document.getElementById('stat-total'),       parseInt("{{ total_baseline_events }}") || 0);
     animateCounter(document.getElementById('stat-new-events'),   parseInt("{{ new_events_count }}")      || 0);
     animateCounter(document.getElementById('stat-asns'),         parseInt("{{ run.unique_asns }}")       || 0);
     animateCounter(document.getElementById('stat-malwares'),     parseInt("{{ run.unique_malwares }}")   || 0);
